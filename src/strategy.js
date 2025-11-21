@@ -188,18 +188,28 @@ class TripleConfirmationStrategy {
     const stopDistance = Config.pipsToPrice(stopPips);
 
     if (isLong) {
-      // Long: Stop below recent swing low or support
+      // Long: Stop below entry (simple fixed distance)
+      stopLoss = entryPrice - stopDistance;
+
+      // Optional: Widen slightly if support is very close (within 10 pips)
       if (analysis.nearestSupport && analysis.nearestSupport < currentPrice) {
-        stopLoss = analysis.nearestSupport - stopDistance;
-      } else {
-        stopLoss = entryPrice - stopDistance;
+        const distanceToSupport = currentPrice - analysis.nearestSupport;
+        if (distanceToSupport < Config.pipsToPrice(10)) {
+          // Support is very close, place stop below it
+          stopLoss = analysis.nearestSupport - Config.pipsToPrice(5);
+        }
       }
     } else {
-      // Short: Stop above recent swing high or resistance
+      // Short: Stop above entry (simple fixed distance)
+      stopLoss = entryPrice + stopDistance;
+
+      // Optional: Widen slightly if resistance is very close (within 10 pips)
       if (analysis.nearestResistance && analysis.nearestResistance > currentPrice) {
-        stopLoss = analysis.nearestResistance + stopDistance;
-      } else {
-        stopLoss = entryPrice + stopDistance;
+        const distanceToResistance = analysis.nearestResistance - currentPrice;
+        if (distanceToResistance < Config.pipsToPrice(10)) {
+          // Resistance is very close, place stop above it
+          stopLoss = analysis.nearestResistance + Config.pipsToPrice(5);
+        }
       }
     }
 
