@@ -235,12 +235,12 @@ class GoldTradingBot {
       logger.info(`Take Profit 2: $${levels.takeProfit2.toFixed(2)}`);
       logger.info('');
 
-      // Place market order with stop loss and first take profit
+      // Place market order with stop loss only (TP managed manually for now)
       const order = await this.client.placeMarketOrder(
         Config.TRADING_SYMBOL,
         units,
-        levels.stopLoss,
-        levels.takeProfit1 // Use TP1 initially
+        levels.stopLoss
+        // levels.takeProfit1 // Disabled due to LOSING_TAKE_PROFIT error
       );
 
       if (!order.success) {
