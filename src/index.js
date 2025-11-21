@@ -250,18 +250,11 @@ class GoldTradingBot {
         return;
       }
 
-      // Add take profit to the trade after it opens (avoids LOSING_TAKE_PROFIT error)
-      if (order.tradeId) {
-        try {
-          await this.client.modifyTrade(order.tradeId, {
-            takeProfit: { price: levels.takeProfit1.toFixed(2) }
-          });
-          logger.info(`✅ Take profit set at $${levels.takeProfit1.toFixed(2)}`);
-        } catch (tpError) {
-          logger.warn(`Failed to set take profit: ${tpError.message}`);
-          logger.warn('Trade will continue with stop loss only');
-        }
-      }
+      // Note: TP will be managed manually for partial exits
+      // We'll close 60% at TP1, then 40% at TP2
+      logger.info(`📊 TP1 target: $${levels.takeProfit1.toFixed(2)} (will close 60%)`);
+      logger.info(`📊 TP2 target: $${levels.takeProfit2.toFixed(2)} (will close 40%)`);
+
 
       logger.info('');
       logger.info('✅ TRADE OPENED SUCCESSFULLY!');
@@ -316,32 +309,62 @@ class GoldTradingBot {
         const tracked = this.activePositions.get(trade.tradeId);
         if (!tracked) continue;
 
-        // Check if TP1 was hit and move stop to breakeven
-        if (!tracked.tp1Hit && Config.MOVE_STOP_TO_BE) {
+        // Check if TP1 was hit - close 60% and move stop to breakeven
+        if (!tracked.tp1Hit) {
           const currentPrice = await this.client.getPrice(trade.instrument);
           const price = currentPrice.mid;
 
-          const isLong = trade.units > 0;
+          const isLong = trade.currentUnits > 0;
           const tp1Hit = isLong
             ? price >= tracked.takeProfit1
             : price <= tracked.takeProfit1;
 
           if (tp1Hit) {
-            logger.info(`🎯 TP1 reached for ${trade.tradeId} - moving stop to breakeven`);
+            logger.info(`🎯 TP1 reached for ${trade.tradeId} at $${price.toFixed(2)}`);
 
-            // Move stop to breakeven
-            await this.client.modifyTrade(trade.tradeId, tracked.entryPrice);
+            // Close 60% of position
+            const closeUnits = Math.floor(Math.abs(trade.currentUnits) * 0.6);
+            const closeUnitsWithSign = isLong ? -closeUnits : closeUnits;
 
-            tracked.tp1Hit = true;
-            logger.info('✅ Stop loss moved to breakeven');
-
-            if (this.telegramBot) {
-              await this.telegramBot.sendNotification(
-                `🎯 *TP1 Reached*\n\n` +
-                `${trade.instrument}\n` +
-                `Stop moved to breakeven ($${tracked.entryPrice.toFixed(2)})\n` +
-                `Now targeting TP2 ($${tracked.takeProfit2.toFixed(2)})`
+            try {
+              const partialClose = await this.client.placeMarketOrder(
+                trade.instrument,
+                closeUnitsWithSign,
+                null // No stop loss on closing order
               );
+
+              if (partialClose.success) {
+                const pnl = parseFloat(partialClose.pl || 0);
+                logger.info(`✅ Closed 60% (${closeUnits} units) - Banked: $${pnl.toFixed(2)}`);
+
+                // Move stop to breakeven on remaining 40%
+                await this.client.modifyTrade(trade.tradeId, {
+                  stopLoss: { price: tracked.entryPrice.toFixed(2) }
+                });
+                logger.info(`✅ Stop moved to breakeven ($${tracked.entryPrice.toFixed(2)})`);
+
+                // Set TP2 on remaining 40%
+                await this.client.modifyTrade(trade.tradeId, {
+                  takeProfit: { price: tracked.takeProfit2.toFixed(2) }
+                });
+                logger.info(`✅ TP2 set at $${tracked.takeProfit2.toFixed(2)} for remaining 40%`);
+
+                tracked.tp1Hit = true;
+
+                if (this.telegramBot) {
+                  await this.telegramBot.sendNotification(
+                    `🎯 *TP1 Hit - 60% Closed!*\n\n` +
+                    `${trade.instrument}\n` +
+                    `Closed: ${closeUnits} units\n` +
+                    `Banked: \\$${pnl.toFixed(2)}\n\n` +
+                    `Remaining 40%:\n` +
+                    `Stop: Breakeven (\\$${tracked.entryPrice.toFixed(2)})\n` +
+                    `TP2: \\$${tracked.takeProfit2.toFixed(2)}`
+                  );
+                }
+              }
+            } catch (error) {
+              logger.error(`Failed to close 60% at TP1: ${error.message}`);
             }
           }
         }
