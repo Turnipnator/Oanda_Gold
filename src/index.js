@@ -29,6 +29,9 @@ class GoldTradingBot {
     // Track active positions
     this.activePositions = new Map();
 
+    // Track last API error notification (to avoid spam)
+    this.lastApiErrorNotification = null;
+
     logger.info('🤖 Gold Trading Bot initialized');
   }
 
@@ -89,24 +92,59 @@ class GoldTradingBot {
 
       cron.schedule(scanInterval, async () => {
         if (this.isRunning) {
-          await this.scanMarket();
+          try {
+            await this.scanMarket();
+          } catch (error) {
+            logger.error(`Market scan failed: ${error.message}`);
+            logger.warn(`Will retry in ${Config.SCAN_INTERVAL_MINUTES} minutes`);
+
+            // Notify user if it's an API outage
+            if (error.message.includes('503') || error.message.includes('failed after')) {
+              if (this.telegramBot) {
+                await this.telegramBot.notifyError(`⚠️ API Issue: ${error.message}\n\nBot is still running and will retry automatically.`);
+              }
+            }
+          }
         }
       });
 
       // Run initial scan
       logger.info('Running initial market scan...');
-      await this.scanMarket();
+      try {
+        await this.scanMarket();
+      } catch (error) {
+        logger.error(`Initial market scan failed: ${error.message}`);
+        logger.warn('Bot will continue and retry on next scheduled scan');
+      }
 
       // Schedule daily reset (at midnight UTC)
       cron.schedule('0 0 * * *', async () => {
-        this.riskManager.resetDailyStats();
-        logger.info('📅 Daily statistics reset');
+        try {
+          this.riskManager.resetDailyStats();
+          logger.info('📅 Daily statistics reset');
+        } catch (error) {
+          logger.error(`Daily reset failed: ${error.message}`);
+        }
       });
 
       // Monitor existing positions every minute
       cron.schedule('* * * * *', async () => {
         if (this.isRunning) {
-          await this.monitorPositions();
+          try {
+            await this.monitorPositions();
+          } catch (error) {
+            logger.error(`Position monitoring failed: ${error.message}`);
+            logger.warn('Will retry in 1 minute');
+
+            // Notify user if it's an API outage (but only once per hour to avoid spam)
+            if ((error.message.includes('503') || error.message.includes('failed after')) &&
+                (!this.lastApiErrorNotification || Date.now() - this.lastApiErrorNotification > 3600000)) {
+              if (this.telegramBot) {
+                await this.telegramBot.notifyError(`⚠️ API Issue during position monitoring: ${error.message}\n\nBot is still running.`);
+                this.lastApiErrorNotification = Date.now();
+              }
+            }
+          }
         }
       });
 
