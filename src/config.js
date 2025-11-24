@@ -58,7 +58,8 @@ class Config {
   static RSI_BEARISH_MAX = parseFloat(process.env.RSI_BEARISH_MAX || '60');
 
   // Entry & Exit Rules
-  static STOP_LOSS_PIPS = parseFloat(process.env.STOP_LOSS_PIPS || '20');
+  // For gold: 1 pip = $0.01, so 300 pips = $3.00 stop loss (reasonable for gold volatility)
+  static STOP_LOSS_PIPS = parseFloat(process.env.STOP_LOSS_PIPS || '300');
   static TAKE_PROFIT_1_RR = parseFloat(process.env.TAKE_PROFIT_1_RR || '1.5');
   static TAKE_PROFIT_2_RR = parseFloat(process.env.TAKE_PROFIT_2_RR || '2.5');
   static MOVE_STOP_TO_BE = process.env.MOVE_STOP_TO_BE !== 'false';
