@@ -362,14 +362,22 @@ class GoldTradingBot {
 
             // Close 60% of position
             const closeUnits = Math.floor(Math.abs(trade.currentUnits) * 0.6);
-            const closeUnitsWithSign = isLong ? -closeUnits : closeUnits;
+
+            // For Oanda, we need to specify the REMAINING units as a string with "REDUCE_ONLY"
+            // To close 60%, we reduce by that amount
+            const unitsToClose = String(closeUnits);
 
             try {
-              const partialClose = await this.client.placeMarketOrder(
-                trade.instrument,
-                closeUnitsWithSign,
-                null // No stop loss on closing order
+              // Use Oanda's trade close endpoint for partial close
+              const response = await this.client.makeRequest('PUT',
+                `/v3/accounts/${this.client.accountId}/trades/${trade.tradeId}/close`,
+                { units: unitsToClose }
               );
+
+              const partialClose = {
+                success: response.orderFillTransaction ? true : false,
+                pl: response.orderFillTransaction?.pl || 0
+              };
 
               if (partialClose.success) {
                 const pnl = parseFloat(partialClose.pl || 0);
