@@ -304,6 +304,7 @@ class GoldTradingBot {
       // Track position
       this.activePositions.set(order.tradeId, {
         tradeId: order.tradeId,
+        symbol: Config.TRADING_SYMBOL,
         signal,
         entryPrice: order.price,
         units: order.units,
@@ -312,7 +313,9 @@ class GoldTradingBot {
         takeProfit2: levels.takeProfit2,
         reason,
         openTime: new Date(),
-        tp1Hit: false
+        tp1Hit: false,
+        bestPrice: order.price, // Track best price for trailing stops
+        currentStopLoss: levels.stopLoss
       });
 
       // Notify via Telegram
@@ -411,6 +414,47 @@ class GoldTradingBot {
               }
             } catch (error) {
               logger.error(`Failed to close 60% at TP1: ${error.message}`);
+            }
+          }
+        }
+
+        // Trailing stop logic (only after TP1 is hit)
+        if (tracked.tp1Hit && Config.ENABLE_TRAILING_STOP) {
+          const currentPrice = await this.client.getPrice(trade.instrument);
+          const price = currentPrice.mid;
+          const isLong = trade.currentUnits > 0;
+
+          // Update best price if price moved favorably
+          const priceMovedFavorably = isLong
+            ? price > tracked.bestPrice
+            : price < tracked.bestPrice;
+
+          if (priceMovedFavorably) {
+            tracked.bestPrice = price;
+
+            // Calculate new trailing stop
+            const trailDistance = Config.pipsToPrice(Config.TRAILING_STOP_DISTANCE_PIPS);
+            const newStopLoss = isLong
+              ? price - trailDistance
+              : price + trailDistance;
+
+            // Only update if new stop is better than current stop
+            const stopImproved = isLong
+              ? newStopLoss > tracked.currentStopLoss
+              : newStopLoss < tracked.currentStopLoss;
+
+            if (stopImproved) {
+              try {
+                await this.client.modifyTrade(trade.tradeId, {
+                  stopLoss: { price: newStopLoss.toFixed(2) }
+                });
+
+                logger.info(`📈 Trailing stop updated for ${trade.tradeId}: $${newStopLoss.toFixed(2)} (trailing $${trailDistance.toFixed(2)} behind $${price.toFixed(2)})`);
+
+                tracked.currentStopLoss = newStopLoss;
+              } catch (error) {
+                logger.error(`Failed to update trailing stop: ${error.message}`);
+              }
             }
           }
         }

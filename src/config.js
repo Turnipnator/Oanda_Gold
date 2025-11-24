@@ -64,6 +64,10 @@ class Config {
   static TAKE_PROFIT_2_RR = parseFloat(process.env.TAKE_PROFIT_2_RR || '2.5');
   static MOVE_STOP_TO_BE = process.env.MOVE_STOP_TO_BE !== 'false';
 
+  // Trailing Stop (for remaining position after TP1)
+  static ENABLE_TRAILING_STOP = process.env.ENABLE_TRAILING_STOP !== 'false';
+  static TRAILING_STOP_DISTANCE_PIPS = parseFloat(process.env.TRAILING_STOP_DISTANCE_PIPS || '200'); // $2.00 trail distance
+
   // Position Sizing (Oanda uses units: 1 unit = $1 worth of gold)
   static MIN_POSITION_SIZE = parseInt(process.env.MIN_POSITION_SIZE || '100');
   static MAX_POSITION_SIZE = parseInt(process.env.MAX_POSITION_SIZE || '50000');
@@ -204,6 +208,7 @@ class Config {
     console.log(`  - Max Portfolio Risk: ${(this.MAX_PORTFOLIO_RISK * 100).toFixed(1)}%`);
     console.log(`  - Stop Loss: ${this.STOP_LOSS_PIPS} pips`);
     console.log(`  - Take Profit Targets: ${this.TAKE_PROFIT_1_RR}R / ${this.TAKE_PROFIT_2_RR}R`);
+    console.log(`  - Trailing Stop: ${this.ENABLE_TRAILING_STOP ? '✅ Enabled' : '❌ Disabled'} (${this.TRAILING_STOP_DISTANCE_PIPS} pips)`);
     console.log(`\n📱 Telegram: ${this.ENABLE_TELEGRAM ? '✅ Enabled' : '❌ Disabled'}`);
     console.log(`📝 Logging: ${this.LOG_LEVEL.toUpperCase()}`);
     console.log(`🌐 Oanda API: ${this.getOandaHostname()}`);
