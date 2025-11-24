@@ -57,6 +57,10 @@ class Config {
   static RSI_BEARISH_MIN = parseFloat(process.env.RSI_BEARISH_MIN || '30');
   static RSI_BEARISH_MAX = parseFloat(process.env.RSI_BEARISH_MAX || '60');
 
+  // Strategy Filters (to avoid choppy/ranging markets)
+  static MIN_EMA_SEPARATION_PIPS = parseFloat(process.env.MIN_EMA_SEPARATION_PIPS || '800'); // $8.00 minimum EMA separation
+  static MIN_CONFIDENCE = parseFloat(process.env.MIN_CONFIDENCE || '60'); // Skip setups below 60% confidence
+
   // Entry & Exit Rules
   // For gold: 1 pip = $0.01, so 300 pips = $3.00 stop loss (reasonable for gold volatility)
   static STOP_LOSS_PIPS = parseFloat(process.env.STOP_LOSS_PIPS || '300');
@@ -203,6 +207,9 @@ class Config {
     console.log(`  - RSI Period: ${this.RSI_PERIOD}`);
     console.log(`  - Bullish RSI Range: ${this.RSI_BULLISH_MIN}-${this.RSI_BULLISH_MAX}`);
     console.log(`  - Bearish RSI Range: ${this.RSI_BEARISH_MIN}-${this.RSI_BEARISH_MAX}`);
+    console.log(`\n🔍 Entry Filters (Anti-Chop):`);
+    console.log(`  - Min EMA Separation: ${this.MIN_EMA_SEPARATION_PIPS} pips ($${this.pipsToPrice(this.MIN_EMA_SEPARATION_PIPS).toFixed(2)})`);
+    console.log(`  - Min Confidence: ${this.MIN_CONFIDENCE}%`);
     console.log(`\n⚖️ Risk Management:`);
     console.log(`  - Max Risk Per Trade: ${(this.MAX_RISK_PER_TRADE * 100).toFixed(1)}%`);
     console.log(`  - Max Portfolio Risk: ${(this.MAX_PORTFOLIO_RISK * 100).toFixed(1)}%`);

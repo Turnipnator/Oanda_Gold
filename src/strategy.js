@@ -33,6 +33,17 @@ class TripleConfirmationStrategy {
       };
     }
 
+    // FILTER: Check minimum EMA separation (avoid choppy markets)
+    const emaSeparation = Math.abs(analysis.indicators.emaFast - analysis.indicators.emaSlow);
+    const minSeparation = Config.pipsToPrice(Config.MIN_EMA_SEPARATION_PIPS);
+    if (emaSeparation < minSeparation) {
+      return {
+        signal: null,
+        reason: `EMAs too close ($${emaSeparation.toFixed(2)} < $${minSeparation.toFixed(2)}) - likely choppy market`,
+        confidence: 0
+      };
+    }
+
     // Check Confirmation #2: RSI (Momentum)
     if (!analysis.rsiValid) {
       const rsi = analysis.indicators.rsi.toFixed(2);
@@ -55,6 +66,15 @@ class TripleConfirmationStrategy {
 
     // All confirmations met - calculate confidence score
     const confidence = this.calculateConfidence(analysis);
+
+    // FILTER: Check minimum confidence (skip low-quality setups)
+    if (confidence < Config.MIN_CONFIDENCE) {
+      return {
+        signal: null,
+        reason: `Setup confidence too low (${confidence}% < ${Config.MIN_CONFIDENCE}%) - skipping marginal setup`,
+        confidence: 0
+      };
+    }
 
     this.logger.strategy('✅ Triple Confirmation met!', {
       trend: analysis.trend,
