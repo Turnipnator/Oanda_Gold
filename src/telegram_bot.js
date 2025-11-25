@@ -46,6 +46,7 @@ class GoldTelegramBot {
       this.bot.onText(/\/pnl/, (msg) => this.handlePnL(msg));
       this.bot.onText(/\/profit/, (msg) => this.handlePnL(msg)); // Alias
       this.bot.onText(/\/balance/, (msg) => this.handleBalance(msg));
+      this.bot.onText(/\/compare/, (msg) => this.handleCompare(msg));
       this.bot.onText(/\/stop/, (msg) => this.handleStop(msg));
       this.bot.onText(/\/resume/, (msg) => this.handleResume(msg));
       this.bot.onText(/\/emergency/, (msg) => this.handleEmergency(msg));
@@ -368,6 +369,49 @@ class GoldTelegramBot {
   }
 
   /**
+   * Handle /compare command - Compare strategies
+   */
+  async handleCompare(msg) {
+    if (!this.isAuthorized(msg.from.id)) return;
+
+    try {
+      if (!this.tradingBot || !this.tradingBot.tracker) {
+        await this.bot.sendMessage(msg.chat.id, '❌ Strategy tracker not available');
+        return;
+      }
+
+      const report = this.tradingBot.tracker.getComparisonReport('all');
+
+      if (!report || report.strategies.length < 2) {
+        await this.bot.sendMessage(msg.chat.id, '📊 Not enough data yet for comparison');
+        return;
+      }
+
+      const [strategy1, strategy2] = report.strategies;
+
+      const compareText =
+        '📊 *STRATEGY COMPARISON*\n\n' +
+        `🟢 *${strategy1.name}* ${strategy1.isLive ? '(LIVE)' : '(HYPOTHETICAL)'}\n` +
+        `Trades: ${strategy1.totalTrades} (${strategy1.winRate.toFixed(1)}% win rate)\n` +
+        `Total P&L: ${strategy1.totalPnL >= 0 ? '+' : ''}$${strategy1.totalPnL.toFixed(2)}\n` +
+        `Profit Factor: ${strategy1.profitFactor.toFixed(2)}\n` +
+        `Avg Win: +$${strategy1.avgWin.toFixed(2)} | Avg Loss: $${strategy1.avgLoss.toFixed(2)}\n\n` +
+        `📝 *${strategy2.name}* ${strategy2.isLive ? '(LIVE)' : '(HYPOTHETICAL)'}\n` +
+        `Trades: ${strategy2.totalTrades} (${strategy2.winRate.toFixed(1)}% win rate)\n` +
+        `Total P&L: ${strategy2.totalPnL >= 0 ? '+' : ''}$${strategy2.totalPnL.toFixed(2)}\n` +
+        `Profit Factor: ${strategy2.profitFactor.toFixed(2)}\n` +
+        `Avg Win: +$${strategy2.avgWin.toFixed(2)} | Avg Loss: $${strategy2.avgLoss.toFixed(2)}\n\n` +
+        `🏆 *Winner*: ${strategy1.totalPnL > strategy2.totalPnL ? strategy1.name : strategy2.name}`;
+
+      await this.bot.sendMessage(msg.chat.id, compareText, { parse_mode: 'Markdown' });
+      this.commandsExecuted++;
+    } catch (error) {
+      this.logger.error(`Error in /compare command: ${error.message}`);
+      await this.bot.sendMessage(msg.chat.id, '❌ Error generating comparison report');
+    }
+  }
+
+  /**
    * Handle /help command
    */
   async handleHelp(msg) {
@@ -379,7 +423,8 @@ class GoldTelegramBot {
       '/status - Bot status and summary\n' +
       '/positions - View open positions\n' +
       '/pnl - P&L reports (daily/all-time)\n' +
-      '/balance - Account balance\n\n' +
+      '/balance - Account balance\n' +
+      '/compare - Compare strategies 📊\n\n' +
       '*Control:*\n' +
       '/stop - Stop trading (keep positions)\n' +
       '/resume - Resume trading\n' +
@@ -557,17 +602,19 @@ class GoldTelegramBot {
   /**
    * Trade opened notification
    */
-  async notifyTradeOpened(symbol, side, entryPrice, size, stopLoss, takeProfit, strategy) {
+  async notifyTradeOpened(symbol, side, entryPrice, size, stopLoss, takeProfit, strategy, strategyName, confidence) {
     const riskAmount = Math.abs(entryPrice - stopLoss) * size;
     // Escape underscores for Markdown
     const symbolEscaped = symbol.replace(/_/g, '\\_');
-    const strategyEscaped = strategy.replace(/_/g, '\\_');
+    const strategyDisplay = strategyName || strategy;
+    const strategyEscaped = strategyDisplay.replace(/_/g, '\\_');
 
     const message =
-      '🟢 *TRADE OPENED*\n\n' +
+      '🟢 *LIVE TRADE OPENED*\n\n' +
+      `🤖 Strategy: ${strategyEscaped}\n` +
       `Symbol: ${symbolEscaped}\n` +
       `Side: ${side}\n` +
-      `Strategy: ${strategyEscaped}\n` +
+      `Confidence: ${confidence}%\n` +
       `Entry: $${entryPrice.toFixed(2)}\n` +
       `Size: ${size} units\n` +
       `Stop Loss: $${stopLoss.toFixed(2)}\n` +
@@ -580,15 +627,17 @@ class GoldTelegramBot {
   /**
    * Trade closed notification
    */
-  async notifyTradeClosed(symbol, entryPrice, exitPrice, pnl, pnlPct, reason) {
+  async notifyTradeClosed(symbol, entryPrice, exitPrice, pnl, pnlPct, reason, strategyName) {
     const emoji = pnl >= 0 ? '🎉' : '😔';
     const pnlSign = pnl >= 0 ? '+' : '';
     const pctSign = pnlPct >= 0 ? '+' : '';
     // Escape underscores for Markdown
     const symbolEscaped = symbol.replace(/_/g, '\\_');
+    const strategyEscaped = strategyName ? strategyName.replace(/_/g, '\\_') : 'Unknown';
 
     const message =
-      `${emoji} *TRADE CLOSED*\n\n` +
+      `${emoji} *LIVE TRADE CLOSED*\n\n` +
+      `🤖 Strategy: ${strategyEscaped}\n` +
       `Symbol: ${symbolEscaped}\n` +
       `Reason: ${reason}\n` +
       `Entry: $${entryPrice.toFixed(2)}\n` +

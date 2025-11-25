@@ -11,6 +11,7 @@ import TripleConfirmationStrategy from './strategy.js';
 import MACrossoverStrategy from './ma_crossover_strategy.js';
 import RiskManager from './risk_manager.js';
 import GoldTelegramBot from './telegram_bot.js';
+import StrategyTracker from './strategy_tracker.js';
 
 class GoldTradingBot {
   constructor() {
@@ -22,14 +23,26 @@ class GoldTradingBot {
     this.client = new OandaClient(logger);
     this.ta = new TechnicalAnalysis(logger);
 
-    // Load strategy based on config
-    if (Config.STRATEGY_TYPE === 'ma_crossover') {
-      this.strategy = new MACrossoverStrategy(logger, this.ta);
-      logger.info('📊 Using MA Crossover (5/20) strategy');
-    } else {
-      this.strategy = new TripleConfirmationStrategy(logger, this.ta);
-      logger.info('📊 Using Triple Confirmation strategy');
-    }
+    // Initialize BOTH strategies for comparison
+    this.tripleStrategy = new TripleConfirmationStrategy(logger, this.ta);
+    this.maStrategy = new MACrossoverStrategy(logger, this.ta);
+
+    // Determine which strategy trades live (from config)
+    const liveStrategyName = Config.STRATEGY_TYPE === 'ma_crossover'
+      ? 'MA Crossover (5/20)'
+      : 'Triple Confirmation';
+
+    this.liveStrategy = Config.STRATEGY_TYPE === 'ma_crossover'
+      ? this.maStrategy
+      : this.tripleStrategy;
+
+    // Initialize strategy tracker
+    this.tracker = new StrategyTracker();
+    this.tracker.registerStrategy('Triple Confirmation', liveStrategyName === 'Triple Confirmation');
+    this.tracker.registerStrategy('MA Crossover (5/20)', liveStrategyName === 'MA Crossover (5/20)');
+
+    logger.info(`🟢 LIVE Strategy: ${liveStrategyName}`);
+    logger.info(`📝 HYPOTHETICAL Strategy: ${liveStrategyName === 'Triple Confirmation' ? 'MA Crossover (5/20)' : 'Triple Confirmation'}`);
 
     this.riskManager = new RiskManager(logger, this.client);
 
@@ -88,8 +101,20 @@ class GoldTradingBot {
 
       // Display strategy information
       logger.info('');
-      logger.info('📊 Strategy: ' + this.strategy.name);
-      logger.info(this.strategy.getDescription());
+      logger.info('═'.repeat(70));
+      logger.info('📊 DUAL STRATEGY COMPARISON MODE');
+      logger.info('═'.repeat(70));
+      logger.info('');
+      logger.info('🟢 LIVE STRATEGY (Trading Real Money):');
+      logger.info('   ' + this.liveStrategy.name);
+      logger.info(this.liveStrategy.getDescription().split('\n').map(l => '   ' + l).join('\n'));
+      logger.info('');
+      logger.info('📝 HYPOTHETICAL STRATEGY (Tracking Only):');
+      const hypotheticalStrategy = this.liveStrategy === this.tripleStrategy ? this.maStrategy : this.tripleStrategy;
+      logger.info('   ' + hypotheticalStrategy.name);
+      logger.info(hypotheticalStrategy.getDescription().split('\n').map(l => '   ' + l).join('\n'));
+      logger.info('');
+      logger.info('═'.repeat(70));
       logger.info('');
 
       // Set running flag
@@ -203,22 +228,44 @@ class GoldTradingBot {
       const analysis = this.ta.analyze(candles);
       this.ta.logAnalysis(analysis);
 
-      // Evaluate strategy (MA Crossover needs candles for SMA calculation)
-      const setup = Config.STRATEGY_TYPE === 'ma_crossover'
-        ? this.strategy.evaluateSetup(analysis, candles)
-        : this.strategy.evaluateSetup(analysis);
+      // Evaluate BOTH strategies
+      const tripleSetup = this.tripleStrategy.evaluateSetup(analysis);
+      const maSetup = this.maStrategy.evaluateSetup(analysis, candles);
 
-      if (!setup.signal) {
-        logger.info(`No setup: ${setup.reason}`);
+      logger.info('');
+      logger.info('─'.repeat(70));
+      logger.info('📊 STRATEGY EVALUATION RESULTS:');
+      logger.info('─'.repeat(70));
+      logger.info(`🟢 Triple Confirmation: ${tripleSetup.signal || 'NO SIGNAL'} (${tripleSetup.confidence}%) - ${tripleSetup.reason}`);
+      logger.info(`📝 MA Crossover (5/20): ${maSetup.signal || 'NO SIGNAL'} (${maSetup.confidence}%) - ${maSetup.reason}`);
+      logger.info('─'.repeat(70));
+      logger.info('');
+
+      // Determine which setup to use for live trading
+      const liveSetup = this.liveStrategy === this.tripleStrategy ? tripleSetup : maSetup;
+      const hypotheticalSetup = this.liveStrategy === this.tripleStrategy ? maSetup : tripleSetup;
+      const liveStrategyName = this.liveStrategy === this.tripleStrategy ? 'Triple Confirmation' : 'MA Crossover (5/20)';
+      const hypotheticalStrategyName = this.liveStrategy === this.tripleStrategy ? 'MA Crossover (5/20)' : 'Triple Confirmation';
+
+      // Check if live strategy has a signal
+      if (!liveSetup.signal) {
+        logger.info(`🟢 LIVE (${liveStrategyName}): No setup - ${liveSetup.reason}`);
+
+        // Check hypothetical strategy
+        if (hypotheticalSetup.signal) {
+          logger.info(`📝 HYPOTHETICAL (${hypotheticalStrategyName}): Would have signaled ${hypotheticalSetup.signal} at ${hypotheticalSetup.confidence}% confidence`);
+        }
+
         return;
       }
 
-      // We have a signal!
+      // We have a LIVE signal!
       logger.info('');
-      logger.info('🎯 TRADE SETUP DETECTED!');
-      logger.info(`Signal: ${setup.signal}`);
-      logger.info(`Confidence: ${setup.confidence}%`);
-      logger.info(`Reason: ${setup.reason}`);
+      logger.info('🎯 LIVE TRADE SETUP DETECTED!');
+      logger.info(`🟢 Strategy: ${liveStrategyName}`);
+      logger.info(`Signal: ${liveSetup.signal}`);
+      logger.info(`Confidence: ${liveSetup.confidence}%`);
+      logger.info(`Reason: ${liveSetup.reason}`);
       logger.info('');
 
       // Check if we already have a position in this instrument
@@ -230,10 +277,10 @@ class GoldTradingBot {
         return;
       }
 
-      // Calculate entry levels (MA Crossover needs sma20 for reference)
-      const levels = Config.STRATEGY_TYPE === 'ma_crossover'
-        ? this.strategy.calculateEntryLevels(analysis, setup.signal, setup.sma20)
-        : this.strategy.calculateEntryLevels(analysis, setup.signal);
+      // Calculate entry levels for LIVE strategy
+      const levels = this.liveStrategy === this.maStrategy
+        ? this.liveStrategy.calculateEntryLevels(analysis, liveSetup.signal, maSetup.sma20)
+        : this.liveStrategy.calculateEntryLevels(analysis, liveSetup.signal);
 
       // Calculate position size
       const positionSize = this.riskManager.calculatePositionSize(
@@ -261,8 +308,31 @@ class GoldTradingBot {
         return;
       }
 
-      // Execute trade
-      await this.executeTrade(setup.signal, units, levels, setup.reason);
+      // Execute LIVE trade
+      await this.executeTrade(liveSetup.signal, units, levels, liveSetup.reason, liveStrategyName, liveSetup.confidence);
+
+      // Record hypothetical trade if other strategy also signaled
+      if (hypotheticalSetup.signal) {
+        logger.info(`📝 HYPOTHETICAL (${hypotheticalStrategyName}): Would also enter ${hypotheticalSetup.signal} at ${hypotheticalSetup.confidence}% confidence`);
+
+        // Calculate hypothetical entry levels
+        const hypotheticalLevels = this.liveStrategy === this.tripleStrategy
+          ? this.maStrategy.calculateEntryLevels(analysis, hypotheticalSetup.signal, maSetup.sma20)
+          : this.tripleStrategy.calculateEntryLevels(analysis, hypotheticalSetup.signal);
+
+        // Track hypothetical trade
+        this.tracker.recordSignal(
+          hypotheticalStrategyName,
+          hypotheticalSetup.signal,
+          hypotheticalLevels.entryPrice,
+          hypotheticalLevels.stopLoss,
+          hypotheticalLevels.takeProfit1,
+          hypotheticalLevels.takeProfit2,
+          Math.abs(units),
+          hypotheticalSetup.reason,
+          hypotheticalSetup.confidence
+        );
+      }
 
     } catch (error) {
       logger.error(`Error scanning market: ${error.message}`);
@@ -275,11 +345,13 @@ class GoldTradingBot {
   /**
    * Execute a trade
    */
-  async executeTrade(signal, units, levels, reason) {
+  async executeTrade(signal, units, levels, reason, strategyName, confidence) {
     try {
       logger.info('');
-      logger.info('🎬 EXECUTING TRADE...');
+      logger.info('🎬 EXECUTING LIVE TRADE...');
+      logger.info(`🟢 Strategy: ${strategyName}`);
       logger.info(`Side: ${signal}`);
+      logger.info(`Confidence: ${confidence}%`);
       logger.info(`Units: ${Math.abs(units)}`);
       logger.info(`Entry: $${levels.entryPrice.toFixed(2)}`);
       logger.info(`Stop Loss: $${levels.stopLoss.toFixed(2)}`);
@@ -320,6 +392,7 @@ class GoldTradingBot {
         tradeId: order.tradeId,
         symbol: Config.TRADING_SYMBOL,
         signal,
+        strategyName,
         entryPrice: order.price,
         units: order.units,
         stopLoss: levels.stopLoss,
@@ -332,6 +405,19 @@ class GoldTradingBot {
         currentStopLoss: levels.stopLoss
       });
 
+      // Record in strategy tracker
+      this.tracker.recordSignal(
+        strategyName,
+        signal,
+        order.price,
+        levels.stopLoss,
+        levels.takeProfit1,
+        levels.takeProfit2,
+        Math.abs(order.units),
+        reason,
+        confidence
+      );
+
       // Notify via Telegram
       if (this.telegramBot) {
         await this.telegramBot.notifyTradeOpened(
@@ -341,7 +427,9 @@ class GoldTradingBot {
           Math.abs(order.units),
           levels.stopLoss,
           levels.takeProfit1,
-          reason
+          reason,
+          strategyName,
+          confidence
         );
       }
 
@@ -511,12 +599,16 @@ class GoldTradingBot {
                 exitPrice,
                 pnl,
                 pnlPct,
-                reason
+                reason,
+                tracked.strategyName
               );
             }
 
             // Update risk manager
             this.riskManager.recordTrade(pnl);
+
+            // Update strategy tracker
+            this.tracker.closeTrade(tracked.strategyName, `LIVE_${trade.id}`, exitPrice, reason);
           }
         } catch (error) {
           logger.warn(`Could not fetch close details for trade ${tradeId}: ${error.message}`);
