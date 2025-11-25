@@ -6,9 +6,7 @@
  * - Others track HYPOTHETICALLY
  * - Daily/Weekly/Monthly comparison reports
  */
-import { createLogger } from './logger.js';
-
-const logger = createLogger('StrategyTracker');
+import logger from './logger.js';
 
 class StrategyTracker {
   constructor() {
