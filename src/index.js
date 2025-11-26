@@ -132,6 +132,10 @@ class GoldTradingBot {
       logger.info(`⏰ Scheduling market scans every ${Config.SCAN_INTERVAL_MINUTES} minutes`);
 
       cron.schedule(scanInterval, async () => {
+        // Heartbeat log to verify cron is executing
+        const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
+        logger.info(`⏰ [${now}] Cron heartbeat - isRunning: ${this.isRunning}`);
+
         if (this.isRunning) {
           try {
             await this.scanMarket();
@@ -139,10 +143,14 @@ class GoldTradingBot {
             logger.error(`Market scan failed: ${error.message}`);
             logger.warn(`Will retry in ${Config.SCAN_INTERVAL_MINUTES} minutes`);
 
-            // Notify user if it's an API outage
+            // Notify user if it's an API outage (with safe error handling)
             if (error.message.includes('503') || error.message.includes('failed after')) {
               if (this.telegramBot) {
-                await this.telegramBot.notifyError(`⚠️ API Issue: ${error.message}\n\nBot is still running and will retry automatically.`);
+                try {
+                  await this.telegramBot.notifyError(`⚠️ API Issue: ${error.message}\n\nBot is still running and will retry automatically.`);
+                } catch (telegramError) {
+                  logger.warn(`Failed to send Telegram notification: ${telegramError.message}`);
+                }
               }
             }
           }
@@ -181,8 +189,12 @@ class GoldTradingBot {
             if ((error.message.includes('503') || error.message.includes('failed after')) &&
                 (!this.lastApiErrorNotification || Date.now() - this.lastApiErrorNotification > 3600000)) {
               if (this.telegramBot) {
-                await this.telegramBot.notifyError(`⚠️ API Issue during position monitoring: ${error.message}\n\nBot is still running.`);
-                this.lastApiErrorNotification = Date.now();
+                try {
+                  await this.telegramBot.notifyError(`⚠️ API Issue during position monitoring: ${error.message}\n\nBot is still running.`);
+                  this.lastApiErrorNotification = Date.now();
+                } catch (telegramError) {
+                  logger.warn(`Failed to send Telegram notification: ${telegramError.message}`);
+                }
               }
             }
           }
@@ -300,7 +312,7 @@ class GoldTradingBot {
       }
 
       // Adjust units for direction (negative for short)
-      const units = setup.signal === 'LONG' ? positionSize : -positionSize;
+      const units = liveSetup.signal === 'LONG' ? positionSize : -positionSize;
 
       // Check risk management
       const canTrade = await this.riskManager.canOpenTrade(
@@ -343,7 +355,11 @@ class GoldTradingBot {
     } catch (error) {
       logger.error(`Error scanning market: ${error.message}`);
       if (this.telegramBot) {
-        await this.telegramBot.notifyError(`Market scan error: ${error.message}`);
+        try {
+          await this.telegramBot.notifyError(`Market scan error: ${error.message}`);
+        } catch (telegramError) {
+          logger.warn(`Failed to send Telegram notification: ${telegramError.message}`);
+        }
       }
     }
   }
@@ -426,23 +442,31 @@ class GoldTradingBot {
 
       // Notify via Telegram
       if (this.telegramBot) {
-        await this.telegramBot.notifyTradeOpened(
-          Config.TRADING_SYMBOL,
-          signal,
-          order.price,
-          Math.abs(order.units),
-          levels.stopLoss,
-          levels.takeProfit1,
-          reason,
-          strategyName,
-          confidence
-        );
+        try {
+          await this.telegramBot.notifyTradeOpened(
+            Config.TRADING_SYMBOL,
+            signal,
+            order.price,
+            Math.abs(order.units),
+            levels.stopLoss,
+            levels.takeProfit1,
+            reason,
+            strategyName,
+            confidence
+          );
+        } catch (telegramError) {
+          logger.warn(`Failed to send trade notification: ${telegramError.message}`);
+        }
       }
 
     } catch (error) {
       logger.error(`Failed to execute trade: ${error.message}`);
       if (this.telegramBot) {
-        await this.telegramBot.notifyError(`Trade execution failed: ${error.message}`);
+        try {
+          await this.telegramBot.notifyError(`Trade execution failed: ${error.message}`);
+        } catch (telegramError) {
+          logger.warn(`Failed to send Telegram notification: ${telegramError.message}`);
+        }
       }
     }
   }
@@ -509,18 +533,22 @@ class GoldTradingBot {
                 tracked.tp1Hit = true;
 
                 if (this.telegramBot) {
-                  // Escape underscores in symbol for Markdown
-                  const symbolEscaped = trade.instrument.replace(/_/g, '\\_');
+                  try {
+                    // Escape underscores in symbol for Markdown
+                    const symbolEscaped = trade.instrument.replace(/_/g, '\\_');
 
-                  await this.telegramBot.sendNotification(
-                    `🎯 *TP1 Hit - 60% Closed!*\n\n` +
-                    `${symbolEscaped}\n` +
-                    `Closed: ${closeUnits} units\n` +
-                    `Banked: $${pnl.toFixed(2)}\n\n` +
-                    `Remaining 40%:\n` +
-                    `Stop: Breakeven ($${tracked.entryPrice.toFixed(2)})\n` +
-                    `TP2: $${tracked.takeProfit2.toFixed(2)}`
-                  );
+                    await this.telegramBot.sendNotification(
+                      `🎯 *TP1 Hit - 60% Closed!*\n\n` +
+                      `${symbolEscaped}\n` +
+                      `Closed: ${closeUnits} units\n` +
+                      `Banked: $${pnl.toFixed(2)}\n\n` +
+                      `Remaining 40%:\n` +
+                      `Stop: Breakeven ($${tracked.entryPrice.toFixed(2)})\n` +
+                      `TP2: $${tracked.takeProfit2.toFixed(2)}`
+                    );
+                  } catch (telegramError) {
+                    logger.warn(`Failed to send TP1 notification: ${telegramError.message}`);
+                  }
                 }
               }
             } catch (error) {
@@ -599,15 +627,19 @@ class GoldTradingBot {
 
             // Notify via Telegram
             if (this.telegramBot) {
-              await this.telegramBot.notifyTradeClosed(
-                tracked.symbol,
-                entryPrice,
-                exitPrice,
-                pnl,
-                pnlPct,
-                reason,
-                tracked.strategyName
-              );
+              try {
+                await this.telegramBot.notifyTradeClosed(
+                  tracked.symbol,
+                  entryPrice,
+                  exitPrice,
+                  pnl,
+                  pnlPct,
+                  reason,
+                  tracked.strategyName
+                );
+              } catch (telegramError) {
+                logger.warn(`Failed to send trade closed notification: ${telegramError.message}`);
+              }
             }
 
             // Update risk manager
