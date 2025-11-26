@@ -127,17 +127,17 @@ class GoldTradingBot {
       this.isRunning = true;
       this.startTime = Date.now();
 
-      // Schedule market scans using setInterval (more reliable than node-cron)
+      // Schedule market scans using recursive setTimeout (most reliable)
       const scanIntervalMs = Config.SCAN_INTERVAL_MINUTES * 60 * 1000;
-      logger.info(`⏰ Scheduling market scans every ${Config.SCAN_INTERVAL_MINUTES} minutes using setInterval`);
-      logger.info(`📍 Interval will fire every ${scanIntervalMs}ms (${scanIntervalMs / 1000} seconds)`);
+      logger.info(`⏰ Scheduling market scans every ${Config.SCAN_INTERVAL_MINUTES} minutes using recursive setTimeout`);
+      logger.info(`📍 Scans will fire every ${scanIntervalMs}ms (${scanIntervalMs / 1000} seconds)`);
 
-      const scanIntervalId = setInterval(() => {
-        (async () => {
+      const scheduleNextScan = () => {
+        setTimeout(async () => {
           try {
-            // Heartbeat log to verify interval is executing
+            // Heartbeat log to verify scan is executing
             const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
-            logger.info(`⏰ [${now}] Scan interval heartbeat - isRunning: ${this.isRunning}`);
+            logger.info(`⏰ [${now}] Scan timeout fired - isRunning: ${this.isRunning}`);
 
             if (this.isRunning) {
               try {
@@ -161,19 +161,20 @@ class GoldTradingBot {
             } else {
               logger.warn(`⏸️ Bot is paused (isRunning: false) - skipping scan`);
             }
-          } catch (intervalError) {
-            // CRITICAL: Catch ANY error to prevent interval death
-            logger.error(`🚨 CRITICAL: Interval callback error: ${intervalError.message}`);
-            logger.error(`Stack: ${intervalError.stack}`);
-            logger.error('Interval will continue despite this error');
+          } catch (scanError) {
+            // CRITICAL: Catch ANY error
+            logger.error(`🚨 CRITICAL: Scan timeout error: ${scanError.message}`);
+            logger.error(`Stack: ${scanError.stack}`);
+          } finally {
+            // ALWAYS schedule the next scan, even if this one failed
+            scheduleNextScan();
           }
-        })().catch(err => {
-          logger.error(`🚨 FATAL: Unhandled promise in scan interval: ${err.message}`);
-        });
-      }, scanIntervalMs);
+        }, scanIntervalMs);
+      };
 
-      logger.info(`✅ setInterval registered successfully with ID: ${scanIntervalId}`);
-      logger.info(`🕐 First interval will fire at: ${new Date(Date.now() + scanIntervalMs).toISOString()}`);
+      scheduleNextScan();
+      logger.info(`✅ Recursive setTimeout initialized`);
+      logger.info(`🕐 First scan will fire at: ${new Date(Date.now() + scanIntervalMs).toISOString()}`);
 
       // Run initial scan
       logger.info('Running initial market scan...');
@@ -194,10 +195,11 @@ class GoldTradingBot {
         }
       });
 
-      // Monitor existing positions every minute using setInterval
-      logger.info(`⏰ Scheduling position monitoring every 60 seconds`);
-      const monitorIntervalId = setInterval(() => {
-        (async () => {
+      // Monitor existing positions every minute using recursive setTimeout
+      logger.info(`⏰ Scheduling position monitoring every 60 seconds using recursive setTimeout`);
+
+      const scheduleNextMonitor = () => {
+        setTimeout(async () => {
           try {
             if (this.isRunning) {
               try {
@@ -221,18 +223,19 @@ class GoldTradingBot {
                 }
               }
             }
-          } catch (intervalError) {
-            // CRITICAL: Catch ANY error to prevent interval death
-            logger.error(`🚨 CRITICAL: Position monitoring interval error: ${intervalError.message}`);
-            logger.error(`Stack: ${intervalError.stack}`);
-            logger.error('Interval will continue despite this error');
+          } catch (monitorError) {
+            // CRITICAL: Catch ANY error
+            logger.error(`🚨 CRITICAL: Position monitoring timeout error: ${monitorError.message}`);
+            logger.error(`Stack: ${monitorError.stack}`);
+          } finally {
+            // ALWAYS schedule the next monitor, even if this one failed
+            scheduleNextMonitor();
           }
-        })().catch(err => {
-          logger.error(`🚨 FATAL: Unhandled promise in monitor interval: ${err.message}`);
-        });
-      }, 60000); // Every 60 seconds
+        }, 60000);
+      };
 
-      logger.info(`✅ Position monitoring interval registered with ID: ${monitorIntervalId}`);
+      scheduleNextMonitor();
+      logger.info(`✅ Recursive setTimeout initialized for position monitoring`);
 
       logger.info('');
       logger.info('═'.repeat(70));
