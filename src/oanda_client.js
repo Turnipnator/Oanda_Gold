@@ -44,7 +44,8 @@ class OandaClient {
         'Authorization': `Bearer ${this.apiKey}`,
         'Content-Type': 'application/json',
         'Accept-Datetime-Format': 'RFC3339'
-      }
+      },
+      timeout: 30000 // 30 second timeout to prevent hanging forever
     };
 
     if (data) {
