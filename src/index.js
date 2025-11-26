@@ -237,14 +237,18 @@ class GoldTradingBot {
       scheduleNextMonitor();
       logger.info(`✅ Recursive setTimeout initialized for position monitoring`);
 
-      // DEBUG: Test if setTimeout works AT ALL
+      // DEBUG: Test if setTimeout works with sync vs async callbacks
       setTimeout(() => {
-        logger.info('🔥🔥🔥 TIMEOUT TEST FIRED AFTER 5 SECONDS! 🔥🔥🔥');
+        logger.info('🔥 SYNC TIMEOUT - 5 SECONDS!');
       }, 5000);
 
-      setTimeout(() => {
-        logger.info('🔥🔥🔥 TIMEOUT TEST FIRED AFTER 10 SECONDS! 🔥🔥🔥');
+      setTimeout(async () => {
+        logger.info('🔥 ASYNC TIMEOUT - 10 SECONDS!');
       }, 10000);
+
+      setTimeout(() => {
+        logger.info('🔥 SYNC TIMEOUT - 15 SECONDS!');
+      }, 15000);
 
       logger.info('');
       logger.info('═'.repeat(70));
