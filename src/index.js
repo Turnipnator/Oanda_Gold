@@ -130,8 +130,9 @@ class GoldTradingBot {
       // Schedule market scans using setInterval (more reliable than node-cron)
       const scanIntervalMs = Config.SCAN_INTERVAL_MINUTES * 60 * 1000;
       logger.info(`⏰ Scheduling market scans every ${Config.SCAN_INTERVAL_MINUTES} minutes using setInterval`);
+      logger.info(`📍 Interval will fire every ${scanIntervalMs}ms (${scanIntervalMs / 1000} seconds)`);
 
-      setInterval(async () => {
+      const scanIntervalId = setInterval(async () => {
         try {
           // Heartbeat log to verify interval is executing
           const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
@@ -167,6 +168,9 @@ class GoldTradingBot {
         }
       }, scanIntervalMs);
 
+      logger.info(`✅ setInterval registered successfully with ID: ${scanIntervalId}`);
+      logger.info(`🕐 First interval will fire at: ${new Date(Date.now() + scanIntervalMs).toISOString()}`);
+
       // Run initial scan
       logger.info('Running initial market scan...');
       try {
@@ -187,7 +191,8 @@ class GoldTradingBot {
       });
 
       // Monitor existing positions every minute using setInterval
-      setInterval(async () => {
+      logger.info(`⏰ Scheduling position monitoring every 60 seconds`);
+      const monitorIntervalId = setInterval(async () => {
         try {
           if (this.isRunning) {
             try {
@@ -218,6 +223,8 @@ class GoldTradingBot {
           logger.error('Interval will continue despite this error');
         }
       }, 60000); // Every 60 seconds
+
+      logger.info(`✅ Position monitoring interval registered with ID: ${monitorIntervalId}`);
 
       logger.info('');
       logger.info('═'.repeat(70));
