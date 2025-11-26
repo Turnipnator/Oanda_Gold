@@ -167,7 +167,8 @@ class GoldTradingBot {
             logger.error(`Stack: ${scanError.stack}`);
           } finally {
             // ALWAYS schedule the next scan, even if this one failed
-            scheduleNextScan();
+            // Use setImmediate to ensure scheduling happens in a fresh event loop tick
+            setImmediate(() => scheduleNextScan());
           }
         }, scanIntervalMs);
       };
@@ -201,6 +202,13 @@ class GoldTradingBot {
       const scheduleNextMonitor = () => {
         setTimeout(async () => {
           try {
+            // Heartbeat log every 5 minutes to avoid spam (60s * 5 = 300s intervals)
+            const now = Date.now();
+            if (!this.lastMonitorLog || now - this.lastMonitorLog >= 300000) {
+              logger.info(`⏰ Position monitoring active (checks every 60s)`);
+              this.lastMonitorLog = now;
+            }
+
             if (this.isRunning) {
               try {
                 await this.monitorPositions();
@@ -229,7 +237,8 @@ class GoldTradingBot {
             logger.error(`Stack: ${monitorError.stack}`);
           } finally {
             // ALWAYS schedule the next monitor, even if this one failed
-            scheduleNextMonitor();
+            // Use setImmediate to ensure scheduling happens in a fresh event loop tick
+            setImmediate(() => scheduleNextMonitor());
           }
         }, 60000);
       };
