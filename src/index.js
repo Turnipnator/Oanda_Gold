@@ -680,15 +680,11 @@ class GoldTradingBot {
                 logger.info(`✅ Closed 60% (${closeUnits} units) - Banked: $${pnl.toFixed(2)}`);
 
                 // Move stop to breakeven on remaining 40%
-                await this.client.modifyTrade(trade.tradeId, {
-                  stopLoss: { price: tracked.entryPrice.toFixed(2) }
-                });
+                await this.client.modifyTrade(trade.tradeId, tracked.entryPrice, null);
                 logger.info(`✅ Stop moved to breakeven ($${tracked.entryPrice.toFixed(2)})`);
 
                 // Set TP2 on remaining 40%
-                await this.client.modifyTrade(trade.tradeId, {
-                  takeProfit: { price: tracked.takeProfit2.toFixed(2) }
-                });
+                await this.client.modifyTrade(trade.tradeId, null, tracked.takeProfit2);
                 logger.info(`✅ TP2 set at $${tracked.takeProfit2.toFixed(2)} for remaining 40%`);
 
                 tracked.tp1Hit = true;
@@ -761,9 +757,7 @@ class GoldTradingBot {
 
               if (stopImproved) {
                 try {
-                  await this.client.modifyTrade(trade.tradeId, {
-                    stopLoss: { price: newStopLoss.toFixed(2) }
-                  });
+                  await this.client.modifyTrade(trade.tradeId, newStopLoss, null);
 
                   const profitLocked = isLong
                     ? newStopLoss - tracked.entryPrice
