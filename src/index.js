@@ -3,6 +3,9 @@
  * Automated XAU/USD trading using Triple Confirmation Strategy on Oanda
  */
 import cron from 'node-cron';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import Config from './config.js';
 import logger from './logger.js';
 import OandaClient from './oanda_client.js';
@@ -12,6 +15,13 @@ import MACrossoverStrategy from './ma_crossover_strategy.js';
 import RiskManager from './risk_manager.js';
 import GoldTelegramBot from './telegram_bot.js';
 import StrategyTracker from './strategy_tracker.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Position data file path - use /app/data in Docker, ./data locally
+const DATA_DIR = process.env.NODE_ENV === 'production' ? '/app/data' : path.join(__dirname, '..', 'data');
+const POSITIONS_FILE = path.join(DATA_DIR, 'active_positions.json');
 
 class GoldTradingBot {
   constructor() {
@@ -52,10 +62,95 @@ class GoldTradingBot {
     // Track active positions
     this.activePositions = new Map();
 
+    // Load persisted positions on startup
+    this.loadPositions();
+
     // Track last API error notification (to avoid spam)
     this.lastApiErrorNotification = null;
 
     logger.info(`🤖 ${Config.BOT_NAME} initialized`);
+  }
+
+  /**
+   * Save active positions to file for persistence across restarts
+   */
+  savePositions() {
+    try {
+      // Ensure data directory exists
+      if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+      }
+
+      // Convert Map to plain object for JSON serialization
+      const data = {};
+      for (const [tradeId, position] of this.activePositions) {
+        data[tradeId] = {
+          ...position,
+          openTime: position.openTime?.toISOString?.() || position.openTime
+        };
+      }
+
+      fs.writeFileSync(POSITIONS_FILE, JSON.stringify(data, null, 2));
+      logger.debug(`💾 Saved ${this.activePositions.size} active positions to file`);
+    } catch (error) {
+      logger.error(`Failed to save positions: ${error.message}`);
+    }
+  }
+
+  /**
+   * Load active positions from file
+   */
+  loadPositions() {
+    try {
+      if (!fs.existsSync(POSITIONS_FILE)) {
+        logger.info('📂 No persisted positions found, starting fresh');
+        return;
+      }
+
+      const rawData = fs.readFileSync(POSITIONS_FILE, 'utf8');
+      const data = JSON.parse(rawData);
+
+      for (const [tradeId, position] of Object.entries(data)) {
+        // Restore Date objects
+        if (position.openTime) {
+          position.openTime = new Date(position.openTime);
+        }
+        this.activePositions.set(tradeId, position);
+      }
+
+      logger.info(`📂 Loaded ${this.activePositions.size} active positions from file`);
+
+      // Log details of loaded positions
+      for (const [tradeId, pos] of this.activePositions) {
+        logger.info(`   📍 Trade ${tradeId}: ${pos.signal} @ $${pos.entryPrice?.toFixed(2)} | TP1: $${pos.takeProfit1?.toFixed(2)} | TP1 Hit: ${pos.tp1Hit ? 'YES' : 'NO'}`);
+      }
+    } catch (error) {
+      logger.error(`Failed to load positions: ${error.message}`);
+    }
+  }
+
+  /**
+   * Sync persisted positions with actual Oanda trades
+   * Removes positions that no longer exist on Oanda
+   */
+  async syncPositionsWithOanda() {
+    try {
+      const openTrades = await this.client.getOpenTrades();
+      const oandaTradeIds = new Set(openTrades.map(t => t.tradeId));
+
+      // Remove positions that no longer exist on Oanda
+      for (const tradeId of this.activePositions.keys()) {
+        if (!oandaTradeIds.has(tradeId)) {
+          logger.info(`🗑️ Removing stale position ${tradeId} (no longer open on Oanda)`);
+          this.activePositions.delete(tradeId);
+        }
+      }
+
+      // Save cleaned up positions
+      this.savePositions();
+    } catch (error) {
+      logger.error(`Failed to sync positions with Oanda: ${error.message}`);
+    }
   }
 
   /**
@@ -91,6 +186,9 @@ class GoldTradingBot {
 
       // Initialize risk manager with current balance
       await this.riskManager.syncBalance();
+
+      // Sync persisted positions with actual Oanda trades
+      await this.syncPositionsWithOanda();
 
       // Start Telegram bot if enabled
       if (Config.ENABLE_TELEGRAM) {
@@ -472,6 +570,9 @@ class GoldTradingBot {
         currentStopLoss: levels.stopLoss
       });
 
+      // Persist position to file
+      this.savePositions();
+
       // Record in strategy tracker
       this.tracker.recordSignal(
         strategyName,
@@ -543,11 +644,19 @@ class GoldTradingBot {
             // Close 60% of position
             const closeUnits = Math.floor(Math.abs(trade.currentUnits) * 0.6);
 
-            // For Oanda, we need to specify the REMAINING units as a string with "REDUCE_ONLY"
-            // To close 60%, we reduce by that amount
+            // For Oanda, units must be a string - try integer format first
+            // Oanda shows units as "159.0" but accepts integer strings for close
             const unitsToClose = String(closeUnits);
 
+            logger.info(`📊 Attempting to close ${unitsToClose} units (60% of ${Math.abs(trade.currentUnits)})`);
+
             try {
+              // Validate units before sending
+              if (closeUnits <= 0 || isNaN(closeUnits)) {
+                logger.error(`Invalid closeUnits calculated: ${closeUnits} from currentUnits: ${trade.currentUnits}`);
+                continue;
+              }
+
               // Use Oanda's trade close endpoint for partial close
               const response = await this.client.makeRequest('PUT',
                 `/v3/accounts/${this.client.accountId}/trades/${trade.tradeId}/close`,
@@ -577,6 +686,9 @@ class GoldTradingBot {
 
                 tracked.tp1Hit = true;
 
+                // Persist updated position state
+                this.savePositions();
+
                 if (this.telegramBot) {
                   try {
                     // Escape underscores in symbol for Markdown
@@ -602,42 +714,67 @@ class GoldTradingBot {
           }
         }
 
-        // Trailing stop logic (only after TP1 is hit)
-        if (tracked.tp1Hit && Config.ENABLE_TRAILING_STOP) {
+        // Trailing stop logic - activates when:
+        // 1. After TP1 is hit, OR
+        // 2. When price has moved favorably by at least the trailing distance (early profit protection)
+        if (Config.ENABLE_TRAILING_STOP) {
           const currentPrice = await this.client.getPrice(trade.instrument);
           const price = currentPrice.mid;
           const isLong = trade.currentUnits > 0;
+          const trailDistance = Config.pipsToPrice(Config.TRAILING_STOP_DISTANCE_PIPS);
 
-          // Update best price if price moved favorably
-          const priceMovedFavorably = isLong
-            ? price > tracked.bestPrice
-            : price < tracked.bestPrice;
+          // Calculate how much price has moved in our favor
+          const profitMove = isLong
+            ? price - tracked.entryPrice
+            : tracked.entryPrice - price;
 
-          if (priceMovedFavorably) {
-            tracked.bestPrice = price;
+          // Activate trailing when:
+          // - TP1 already hit, OR
+          // - Price moved in our favor by at least the trailing distance (e.g., $2.00)
+          const shouldTrail = tracked.tp1Hit || profitMove >= trailDistance;
 
-            // Calculate new trailing stop
-            const trailDistance = Config.pipsToPrice(Config.TRAILING_STOP_DISTANCE_PIPS);
-            const newStopLoss = isLong
-              ? price - trailDistance
-              : price + trailDistance;
+          if (shouldTrail) {
+            // Update best price if price moved favorably
+            const priceMovedFavorably = isLong
+              ? price > tracked.bestPrice
+              : price < tracked.bestPrice;
 
-            // Only update if new stop is better than current stop
-            const stopImproved = isLong
-              ? newStopLoss > tracked.currentStopLoss
-              : newStopLoss < tracked.currentStopLoss;
+            if (priceMovedFavorably) {
+              tracked.bestPrice = price;
 
-            if (stopImproved) {
-              try {
-                await this.client.modifyTrade(trade.tradeId, {
-                  stopLoss: { price: newStopLoss.toFixed(2) }
-                });
+              // Calculate new trailing stop
+              const newStopLoss = isLong
+                ? price - trailDistance
+                : price + trailDistance;
 
-                logger.info(`📈 Trailing stop updated for ${trade.tradeId}: $${newStopLoss.toFixed(2)} (trailing $${trailDistance.toFixed(2)} behind $${price.toFixed(2)})`);
+              // Only update if new stop is better than current stop
+              const stopImproved = isLong
+                ? newStopLoss > tracked.currentStopLoss
+                : newStopLoss < tracked.currentStopLoss;
 
-                tracked.currentStopLoss = newStopLoss;
-              } catch (error) {
-                logger.error(`Failed to update trailing stop: ${error.message}`);
+              if (stopImproved) {
+                try {
+                  await this.client.modifyTrade(trade.tradeId, {
+                    stopLoss: { price: newStopLoss.toFixed(2) }
+                  });
+
+                  const profitLocked = isLong
+                    ? newStopLoss - tracked.entryPrice
+                    : tracked.entryPrice - newStopLoss;
+
+                  if (profitLocked > 0) {
+                    logger.info(`📈 Trailing stop: ${trade.tradeId} @ $${newStopLoss.toFixed(2)} (locks in $${profitLocked.toFixed(2)} profit per unit)`);
+                  } else {
+                    logger.info(`📈 Trailing stop: ${trade.tradeId} @ $${newStopLoss.toFixed(2)} (trailing $${trailDistance.toFixed(2)} behind $${price.toFixed(2)})`);
+                  }
+
+                  tracked.currentStopLoss = newStopLoss;
+
+                  // Persist updated position state
+                  this.savePositions();
+                } catch (error) {
+                  logger.error(`Failed to update trailing stop: ${error.message}`);
+                }
               }
             }
           }
@@ -652,6 +789,9 @@ class GoldTradingBot {
       for (const tradeId of closedTrades) {
         const tracked = this.activePositions.get(tradeId);
         this.activePositions.delete(tradeId);
+
+        // Persist removal
+        this.savePositions();
 
         logger.info(`Trade ${tradeId} was closed`);
 
