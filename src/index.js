@@ -374,18 +374,25 @@ class GoldTradingBot {
       logger.info('🔍 Scanning market for setups...');
 
       // Get historical candles
-      const candles = await this.client.getCandles(
+      const allCandles = await this.client.getCandles(
         Config.TRADING_SYMBOL,
         Config.TIMEFRAME,
         200
       );
+
+      // CRITICAL: Filter out incomplete candles for strategy calculations
+      // Using incomplete candles causes SMAs to shift as price moves within the candle,
+      // which can trigger false crossover signals
+      const candles = allCandles.filter(c => c.complete);
+
+      logger.debug(`📊 Candles: ${allCandles.length} total, ${candles.length} complete`);
 
       if (candles.length < 100) {
         logger.warn('Insufficient candle data');
         return;
       }
 
-      // Perform technical analysis
+      // Perform technical analysis (uses completed candles for accurate indicators)
       const analysis = this.ta.analyze(candles);
       this.ta.logAnalysis(analysis);
 

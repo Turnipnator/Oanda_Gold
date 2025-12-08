@@ -11,6 +11,16 @@
  * Classic trend-following strategy - simple and reactive
  */
 import Config from './config.js';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// State file path - use /app/data in Docker, ./data locally
+const DATA_DIR = process.env.NODE_ENV === 'production' ? '/app/data' : path.join(__dirname, '..', 'data');
+const STATE_FILE = path.join(DATA_DIR, 'ma_strategy_state.json');
 
 class MACrossoverStrategy {
   constructor(logger, technicalAnalysis) {
@@ -19,7 +29,60 @@ class MACrossoverStrategy {
     this.name = 'MA Crossover (5/20)';
     this.previousSMA5 = null;
     this.previousSMA20 = null;
+    this.lastCandleTime = null; // Track last candle to prevent duplicate signals
     this.lastSignal = null; // Track last signal to detect crosses
+
+    // Load persisted state on startup
+    this.loadState();
+  }
+
+  /**
+   * Save strategy state to file for persistence across restarts
+   */
+  saveState() {
+    try {
+      // Ensure data directory exists
+      if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+      }
+
+      const state = {
+        previousSMA5: this.previousSMA5,
+        previousSMA20: this.previousSMA20,
+        lastCandleTime: this.lastCandleTime,
+        lastSignal: this.lastSignal,
+        savedAt: new Date().toISOString()
+      };
+
+      fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+      this.logger.debug(`💾 MA strategy state saved`);
+    } catch (error) {
+      this.logger.error(`Failed to save MA strategy state: ${error.message}`);
+    }
+  }
+
+  /**
+   * Load strategy state from file
+   */
+  loadState() {
+    try {
+      if (!fs.existsSync(STATE_FILE)) {
+        this.logger.info('📂 No existing MA strategy state found, starting fresh');
+        return;
+      }
+
+      const rawData = fs.readFileSync(STATE_FILE, 'utf8');
+      const state = JSON.parse(rawData);
+
+      this.previousSMA5 = state.previousSMA5;
+      this.previousSMA20 = state.previousSMA20;
+      this.lastCandleTime = state.lastCandleTime;
+      this.lastSignal = state.lastSignal;
+
+      this.logger.info(`📂 Loaded MA strategy state: SMA5=$${this.previousSMA5?.toFixed(2) || 'null'}, SMA20=$${this.previousSMA20?.toFixed(2) || 'null'}, lastCandle=${this.lastCandleTime || 'null'}`);
+    } catch (error) {
+      this.logger.error(`Failed to load MA strategy state: ${error.message}`);
+    }
   }
 
   /**
@@ -47,7 +110,11 @@ class MACrossoverStrategy {
       };
     }
 
-    // Calculate SMAs
+    // Get the most recent completed candle time
+    const lastCandle = candles[candles.length - 1];
+    const currentCandleTime = lastCandle.time.toISOString();
+
+    // Calculate SMAs using only completed candles
     const sma5 = this.calculateSMA(candles, 5);
     const sma20 = this.calculateSMA(candles, 20);
 
@@ -61,11 +128,16 @@ class MACrossoverStrategy {
 
     const currentPrice = analysis.indicators.price;
 
+    // Check if this is a new candle (prevents duplicate signals on same candle)
+    const isNewCandle = this.lastCandleTime !== currentCandleTime;
+
     // Detect crossovers (need previous values)
     if (this.previousSMA5 === null || this.previousSMA20 === null) {
-      // First run - just store values
+      // First run - just store values and save state
       this.previousSMA5 = sma5;
       this.previousSMA20 = sma20;
+      this.lastCandleTime = currentCandleTime;
+      this.saveState();
       return {
         signal: null,
         reason: 'Initializing - need previous SMA values to detect crosses',
@@ -73,14 +145,28 @@ class MACrossoverStrategy {
       };
     }
 
+    // If same candle as before, don't generate new signals
+    if (!isNewCandle) {
+      return {
+        signal: null,
+        reason: `No new candle (last: ${this.lastCandleTime?.substring(0, 16)}). 5 SMA: $${sma5.toFixed(2)}, 20 SMA: $${sma20.toFixed(2)}`,
+        confidence: 0,
+        sma5,
+        sma20
+      };
+    }
+
     let signal = null;
     let reason = '';
     let confidence = 50; // Base confidence for crossover signals
 
+    // Log the comparison for debugging
+    this.logger.debug(`📊 MA Check: prev5=${this.previousSMA5?.toFixed(2)} prev20=${this.previousSMA20?.toFixed(2)} → curr5=${sma5.toFixed(2)} curr20=${sma20.toFixed(2)}`);
+
     // Bullish crossover: 5 SMA crosses above 20 SMA
     if (this.previousSMA5 <= this.previousSMA20 && sma5 > sma20) {
       signal = 'LONG';
-      reason = `Bullish crossover: 5 SMA ($${sma5.toFixed(2)}) crossed above 20 SMA ($${sma20.toFixed(2)})`;
+      reason = `Bullish crossover: 5 SMA ($${sma5.toFixed(2)}) crossed above 20 SMA ($${sma20.toFixed(2)}) [prev: $${this.previousSMA5.toFixed(2)}/$${this.previousSMA20.toFixed(2)}]`;
 
       // Increase confidence if price is also above 20 SMA
       if (currentPrice > sma20) confidence = 65;
@@ -92,7 +178,7 @@ class MACrossoverStrategy {
     // Bearish crossover: 5 SMA crosses below 20 SMA
     else if (this.previousSMA5 >= this.previousSMA20 && sma5 < sma20) {
       signal = 'SHORT';
-      reason = `Bearish crossover: 5 SMA ($${sma5.toFixed(2)}) crossed below 20 SMA ($${sma20.toFixed(2)})`;
+      reason = `Bearish crossover: 5 SMA ($${sma5.toFixed(2)}) crossed below 20 SMA ($${sma20.toFixed(2)}) [prev: $${this.previousSMA5.toFixed(2)}/$${this.previousSMA20.toFixed(2)}]`;
 
       // Increase confidence if price is also below 20 SMA
       if (currentPrice < sma20) confidence = 65;
@@ -103,12 +189,14 @@ class MACrossoverStrategy {
     }
     // No crossover
     else {
-      reason = `No crossover detected (5 SMA: $${sma5.toFixed(2)}, 20 SMA: $${sma20.toFixed(2)})`;
+      reason = `No crossover (5 SMA: $${sma5.toFixed(2)}, 20 SMA: $${sma20.toFixed(2)})`;
     }
 
-    // Store current values for next scan
+    // Store current values for next scan and persist state
     this.previousSMA5 = sma5;
     this.previousSMA20 = sma20;
+    this.lastCandleTime = currentCandleTime;
+    this.saveState();
 
     if (signal) {
       this.lastSignal = signal;
@@ -116,7 +204,8 @@ class MACrossoverStrategy {
         sma5: sma5.toFixed(2),
         sma20: sma20.toFixed(2),
         signal,
-        confidence
+        confidence,
+        candleTime: currentCandleTime
       });
     }
 
