@@ -2,6 +2,9 @@
 .env
 .env.local
 
+# Local Claude notes (contains VPS credentials, deployment commands)
+CLAUDE.local.md
+
 # Node modules
 node_modules/
 yarn.lock
