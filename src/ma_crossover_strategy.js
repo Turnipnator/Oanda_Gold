@@ -1,14 +1,20 @@
 /**
- * Simple Moving Average Crossover Strategy
+ * Enhanced Moving Average Crossover Strategy
  *
  * Entry Rules:
- * - LONG: When 5 SMA crosses above 20 SMA
- * - SHORT: When 5 SMA crosses below 20 SMA
+ * - LONG: 10 SMA crosses above 50 SMA
+ *         + RSI > 50 (momentum confirmation)
+ *         + ADX > 20 (trending market)
+ * - SHORT: 10 SMA crosses below 50 SMA
+ *          + RSI < 50 (momentum confirmation)
+ *          + ADX > 20 (trending market)
  *
  * Exit Rules:
- * - Close position when price closes back through 20 SMA
+ * - Close position when price closes back through 50 SMA
  *
- * Classic trend-following strategy - simple and reactive
+ * Filters to avoid whipsaws:
+ * - RSI must confirm direction (>50 for longs, <50 for shorts)
+ * - ADX must be >20 to confirm trending (not ranging) market
  */
 import Config from './config.js';
 import fs from 'fs';
@@ -22,15 +28,21 @@ const __dirname = path.dirname(__filename);
 const DATA_DIR = process.env.NODE_ENV === 'production' ? '/app/data' : path.join(__dirname, '..', 'data');
 const STATE_FILE = path.join(DATA_DIR, 'ma_strategy_state.json');
 
+// Strategy parameters
+const SMA_FAST = 10;   // Fast SMA period (was 5)
+const SMA_SLOW = 50;   // Slow SMA period (was 20)
+const RSI_THRESHOLD = 50;  // RSI level for confirmation
+const ADX_MIN = 20;        // Minimum ADX for trending market
+
 class MACrossoverStrategy {
   constructor(logger, technicalAnalysis) {
     this.logger = logger;
     this.ta = technicalAnalysis;
-    this.name = 'MA Crossover (5/20)';
-    this.previousSMA5 = null;
-    this.previousSMA20 = null;
-    this.lastCandleTime = null; // Track last candle to prevent duplicate signals
-    this.lastSignal = null; // Track last signal to detect crosses
+    this.name = `MA Crossover (${SMA_FAST}/${SMA_SLOW})`;
+    this.previousSMAFast = null;
+    this.previousSMASlow = null;
+    this.lastCandleTime = null;
+    this.lastSignal = null;
 
     // Load persisted state on startup
     this.loadState();
@@ -41,14 +53,13 @@ class MACrossoverStrategy {
    */
   saveState() {
     try {
-      // Ensure data directory exists
       if (!fs.existsSync(DATA_DIR)) {
         fs.mkdirSync(DATA_DIR, { recursive: true });
       }
 
       const state = {
-        previousSMA5: this.previousSMA5,
-        previousSMA20: this.previousSMA20,
+        previousSMAFast: this.previousSMAFast,
+        previousSMASlow: this.previousSMASlow,
         lastCandleTime: this.lastCandleTime,
         lastSignal: this.lastSignal,
         savedAt: new Date().toISOString()
@@ -74,12 +85,12 @@ class MACrossoverStrategy {
       const rawData = fs.readFileSync(STATE_FILE, 'utf8');
       const state = JSON.parse(rawData);
 
-      this.previousSMA5 = state.previousSMA5;
-      this.previousSMA20 = state.previousSMA20;
+      this.previousSMAFast = state.previousSMAFast || state.previousSMA5;
+      this.previousSMASlow = state.previousSMASlow || state.previousSMA20;
       this.lastCandleTime = state.lastCandleTime;
       this.lastSignal = state.lastSignal;
 
-      this.logger.info(`📂 Loaded MA strategy state: SMA5=$${this.previousSMA5?.toFixed(2) || 'null'}, SMA20=$${this.previousSMA20?.toFixed(2) || 'null'}, lastCandle=${this.lastCandleTime || 'null'}`);
+      this.logger.info(`📂 Loaded MA strategy state: SMA${SMA_FAST}=$${this.previousSMAFast?.toFixed(2) || 'null'}, SMA${SMA_SLOW}=$${this.previousSMASlow?.toFixed(2) || 'null'}`);
     } catch (error) {
       this.logger.error(`Failed to load MA strategy state: ${error.message}`);
     }
@@ -101,8 +112,8 @@ class MACrossoverStrategy {
    * Returns: { signal: 'LONG' | 'SHORT' | null, reason: string, confidence: number }
    */
   evaluateSetup(analysis, candles) {
-    // Need at least 20 candles for 20 SMA
-    if (!candles || candles.length < 20) {
+    // Need enough candles for slow SMA
+    if (!candles || candles.length < SMA_SLOW) {
       return {
         signal: null,
         reason: 'Insufficient candle data for SMA calculation',
@@ -114,11 +125,11 @@ class MACrossoverStrategy {
     const lastCandle = candles[candles.length - 1];
     const currentCandleTime = lastCandle.time.toISOString();
 
-    // Calculate SMAs using only completed candles
-    const sma5 = this.calculateSMA(candles, 5);
-    const sma20 = this.calculateSMA(candles, 20);
+    // Calculate SMAs
+    const smaFast = this.calculateSMA(candles, SMA_FAST);
+    const smaSlow = this.calculateSMA(candles, SMA_SLOW);
 
-    if (!sma5 || !sma20) {
+    if (!smaFast || !smaSlow) {
       return {
         signal: null,
         reason: 'Unable to calculate SMAs',
@@ -126,21 +137,23 @@ class MACrossoverStrategy {
       };
     }
 
+    // Get RSI and ADX from analysis
+    const rsi = analysis.indicators.rsi;
+    const adx = analysis.indicators.adx;
     const currentPrice = analysis.indicators.price;
 
-    // Check if this is a new candle (prevents duplicate signals on same candle)
+    // Check if this is a new candle
     const isNewCandle = this.lastCandleTime !== currentCandleTime;
 
-    // Detect crossovers (need previous values)
-    if (this.previousSMA5 === null || this.previousSMA20 === null) {
-      // First run - just store values and save state
-      this.previousSMA5 = sma5;
-      this.previousSMA20 = sma20;
+    // First run - just store values
+    if (this.previousSMAFast === null || this.previousSMASlow === null) {
+      this.previousSMAFast = smaFast;
+      this.previousSMASlow = smaSlow;
       this.lastCandleTime = currentCandleTime;
       this.saveState();
       return {
         signal: null,
-        reason: 'Initializing - need previous SMA values to detect crosses',
+        reason: `Initializing - need previous SMA values to detect crosses`,
         confidence: 0
       };
     }
@@ -149,60 +162,95 @@ class MACrossoverStrategy {
     if (!isNewCandle) {
       return {
         signal: null,
-        reason: `No new candle (last: ${this.lastCandleTime?.substring(0, 16)}). 5 SMA: $${sma5.toFixed(2)}, 20 SMA: $${sma20.toFixed(2)}`,
+        reason: `No new candle. ${SMA_FAST} SMA: $${smaFast.toFixed(2)}, ${SMA_SLOW} SMA: $${smaSlow.toFixed(2)}, RSI: ${rsi?.toFixed(1) || 'N/A'}, ADX: ${adx?.toFixed(1) || 'N/A'}`,
         confidence: 0,
-        sma5,
-        sma20
+        smaFast,
+        smaSlow
       };
     }
 
     let signal = null;
     let reason = '';
-    let confidence = 50; // Base confidence for crossover signals
+    let confidence = 50;
+    const filters = [];
 
     // Log the comparison for debugging
-    this.logger.debug(`📊 MA Check: prev5=${this.previousSMA5?.toFixed(2)} prev20=${this.previousSMA20?.toFixed(2)} → curr5=${sma5.toFixed(2)} curr20=${sma20.toFixed(2)}`);
+    this.logger.debug(`📊 MA Check: prevFast=${this.previousSMAFast?.toFixed(2)} prevSlow=${this.previousSMASlow?.toFixed(2)} → currFast=${smaFast.toFixed(2)} currSlow=${smaSlow.toFixed(2)}`);
 
-    // Bullish crossover: 5 SMA crosses above 20 SMA
-    if (this.previousSMA5 <= this.previousSMA20 && sma5 > sma20) {
+    // Check for crossover
+    const bullishCrossover = this.previousSMAFast <= this.previousSMASlow && smaFast > smaSlow;
+    const bearishCrossover = this.previousSMAFast >= this.previousSMASlow && smaFast < smaSlow;
+
+    if (bullishCrossover) {
       signal = 'LONG';
-      reason = `Bullish crossover: 5 SMA ($${sma5.toFixed(2)}) crossed above 20 SMA ($${sma20.toFixed(2)}) [prev: $${this.previousSMA5.toFixed(2)}/$${this.previousSMA20.toFixed(2)}]`;
+      reason = `Bullish crossover: ${SMA_FAST} SMA ($${smaFast.toFixed(2)}) crossed above ${SMA_SLOW} SMA ($${smaSlow.toFixed(2)})`;
 
-      // Increase confidence if price is also above 20 SMA
-      if (currentPrice > sma20) confidence = 65;
+      // Apply filters
+      if (rsi !== null && rsi <= RSI_THRESHOLD) {
+        filters.push(`RSI ${rsi.toFixed(1)} ≤ ${RSI_THRESHOLD} (weak momentum)`);
+        signal = null;
+      }
 
-      // Increase confidence if crossover is strong (wide separation)
-      const separation = sma5 - sma20;
-      if (separation > 5) confidence = 75;
+      if (adx !== null && adx < ADX_MIN) {
+        filters.push(`ADX ${adx.toFixed(1)} < ${ADX_MIN} (ranging market)`);
+        signal = null;
+      }
+
+      // Adjust confidence based on conditions
+      if (signal) {
+        if (currentPrice > smaSlow) confidence += 10;
+        if (rsi !== null && rsi > 55) confidence += 10;
+        if (adx !== null && adx > 25) confidence += 10;
+        const separation = smaFast - smaSlow;
+        if (separation > 5) confidence += 5;
+      }
     }
-    // Bearish crossover: 5 SMA crosses below 20 SMA
-    else if (this.previousSMA5 >= this.previousSMA20 && sma5 < sma20) {
+    else if (bearishCrossover) {
       signal = 'SHORT';
-      reason = `Bearish crossover: 5 SMA ($${sma5.toFixed(2)}) crossed below 20 SMA ($${sma20.toFixed(2)}) [prev: $${this.previousSMA5.toFixed(2)}/$${this.previousSMA20.toFixed(2)}]`;
+      reason = `Bearish crossover: ${SMA_FAST} SMA ($${smaFast.toFixed(2)}) crossed below ${SMA_SLOW} SMA ($${smaSlow.toFixed(2)})`;
 
-      // Increase confidence if price is also below 20 SMA
-      if (currentPrice < sma20) confidence = 65;
+      // Apply filters
+      if (rsi !== null && rsi >= RSI_THRESHOLD) {
+        filters.push(`RSI ${rsi.toFixed(1)} ≥ ${RSI_THRESHOLD} (weak momentum)`);
+        signal = null;
+      }
 
-      // Increase confidence if crossover is strong (wide separation)
-      const separation = sma20 - sma5;
-      if (separation > 5) confidence = 75;
+      if (adx !== null && adx < ADX_MIN) {
+        filters.push(`ADX ${adx.toFixed(1)} < ${ADX_MIN} (ranging market)`);
+        signal = null;
+      }
+
+      // Adjust confidence based on conditions
+      if (signal) {
+        if (currentPrice < smaSlow) confidence += 10;
+        if (rsi !== null && rsi < 45) confidence += 10;
+        if (adx !== null && adx > 25) confidence += 10;
+        const separation = smaSlow - smaFast;
+        if (separation > 5) confidence += 5;
+      }
     }
-    // No crossover
     else {
-      reason = `No crossover (5 SMA: $${sma5.toFixed(2)}, 20 SMA: $${sma20.toFixed(2)})`;
+      reason = `No crossover (${SMA_FAST} SMA: $${smaFast.toFixed(2)}, ${SMA_SLOW} SMA: $${smaSlow.toFixed(2)})`;
     }
 
-    // Store current values for next scan and persist state
-    this.previousSMA5 = sma5;
-    this.previousSMA20 = sma20;
+    // If crossover detected but filtered out
+    if ((bullishCrossover || bearishCrossover) && signal === null && filters.length > 0) {
+      reason += ` - FILTERED: ${filters.join(', ')}`;
+    }
+
+    // Store current values and persist state
+    this.previousSMAFast = smaFast;
+    this.previousSMASlow = smaSlow;
     this.lastCandleTime = currentCandleTime;
     this.saveState();
 
     if (signal) {
       this.lastSignal = signal;
-      this.logger.strategy(`✅ MA Crossover detected!`, {
-        sma5: sma5.toFixed(2),
-        sma20: sma20.toFixed(2),
+      this.logger.strategy(`✅ MA Crossover signal!`, {
+        smaFast: smaFast.toFixed(2),
+        smaSlow: smaSlow.toFixed(2),
+        rsi: rsi?.toFixed(1) || 'N/A',
+        adx: adx?.toFixed(1) || 'N/A',
         signal,
         confidence,
         candleTime: currentCandleTime
@@ -213,33 +261,33 @@ class MACrossoverStrategy {
       signal,
       reason,
       confidence,
-      sma5,
-      sma20,
+      smaFast,
+      smaSlow,
       analysis
     };
   }
 
   /**
    * Check if position should be exited
-   * Exit when price closes back through 20 SMA
+   * Exit when price closes back through slow SMA
    */
   shouldExit(position, currentPrice, candles) {
-    if (!candles || candles.length < 20) return false;
+    if (!candles || candles.length < SMA_SLOW) return false;
 
-    const sma20 = this.calculateSMA(candles, 20);
-    if (!sma20) return false;
+    const smaSlow = this.calculateSMA(candles, SMA_SLOW);
+    if (!smaSlow) return false;
 
     const isLong = position.signal === 'LONG';
 
-    // Exit LONG when price closes below 20 SMA
-    if (isLong && currentPrice < sma20) {
-      this.logger.strategy(`Exit signal: Price ($${currentPrice.toFixed(2)}) closed below 20 SMA ($${sma20.toFixed(2)})`);
+    // Exit LONG when price closes below slow SMA
+    if (isLong && currentPrice < smaSlow) {
+      this.logger.strategy(`Exit signal: Price ($${currentPrice.toFixed(2)}) closed below ${SMA_SLOW} SMA ($${smaSlow.toFixed(2)})`);
       return true;
     }
 
-    // Exit SHORT when price closes above 20 SMA
-    if (!isLong && currentPrice > sma20) {
-      this.logger.strategy(`Exit signal: Price ($${currentPrice.toFixed(2)}) closed above 20 SMA ($${sma20.toFixed(2)})`);
+    // Exit SHORT when price closes above slow SMA
+    if (!isLong && currentPrice > smaSlow) {
+      this.logger.strategy(`Exit signal: Price ($${currentPrice.toFixed(2)}) closed above ${SMA_SLOW} SMA ($${smaSlow.toFixed(2)})`);
       return true;
     }
 
@@ -248,21 +296,19 @@ class MACrossoverStrategy {
 
   /**
    * Calculate entry levels (stop loss and take profit)
-   * Using same risk management as main strategy
    */
-  calculateEntryLevels(analysis, signal, sma20) {
+  calculateEntryLevels(analysis, signal, smaSlow) {
     const currentPrice = analysis.indicators.price;
     const isLong = signal === 'LONG';
 
-    // Entry: Current market price
     const entryPrice = currentPrice;
 
-    // Stop Loss: Use same fixed distance as main strategy
+    // Stop Loss
     const stopPips = Config.STOP_LOSS_PIPS;
     const stopDistance = Config.pipsToPrice(stopPips);
     const stopLoss = isLong ? entryPrice - stopDistance : entryPrice + stopDistance;
 
-    // Take Profits: Use same R:R ratios as main strategy
+    // Take Profits
     const riskDistance = Math.abs(entryPrice - stopLoss);
     const tp1Distance = riskDistance * Config.TAKE_PROFIT_1_RR;
     const tp2Distance = riskDistance * Config.TAKE_PROFIT_2_RR;
@@ -277,9 +323,7 @@ class MACrossoverStrategy {
       stopLoss: stopLoss.toFixed(2),
       takeProfit1: takeProfit1.toFixed(2),
       takeProfit2: takeProfit2.toFixed(2),
-      riskPips: riskPips.toFixed(1),
-      riskReward1: `1:${Config.TAKE_PROFIT_1_RR}`,
-      riskReward2: `1:${Config.TAKE_PROFIT_2_RR}`
+      riskPips: riskPips.toFixed(1)
     });
 
     return {
@@ -298,10 +342,11 @@ class MACrossoverStrategy {
     return `
       ${this.name}
 
-      Entry: 5 SMA crosses 20 SMA
-      Exit: Price closes back through 20 SMA
+      Entry: ${SMA_FAST} SMA crosses ${SMA_SLOW} SMA
+      Filters: RSI ${RSI_THRESHOLD} confirmation, ADX > ${ADX_MIN}
+      Exit: Price closes back through ${SMA_SLOW} SMA
 
-      Simple trend-following crossover system
+      Enhanced trend-following with momentum & trend filters
     `.trim();
   }
 }

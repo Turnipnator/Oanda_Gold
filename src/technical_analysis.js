@@ -1,8 +1,8 @@
 /**
  * Technical Analysis Engine
- * Calculates indicators (EMA, RSI) and identifies patterns
+ * Calculates indicators (EMA, RSI, ADX) and identifies patterns
  */
-import { EMA, RSI } from 'technicalindicators';
+import { EMA, RSI, ADX } from 'technicalindicators';
 import Config from './config.js';
 
 class TechnicalAnalysis {
@@ -41,23 +41,50 @@ class TechnicalAnalysis {
   }
 
   /**
+   * Calculate ADX (Average Directional Index) - measures trend strength
+   * ADX > 25 = strong trend (good for trend-following strategies)
+   * ADX < 20 = weak trend / ranging market (avoid trend-following)
+   */
+  calculateADX(candles, period = 14) {
+    const highs = candles.map(c => c.high);
+    const lows = candles.map(c => c.low);
+    const closes = candles.map(c => c.close);
+
+    const adxValues = ADX.calculate({
+      period,
+      high: highs,
+      low: lows,
+      close: closes
+    });
+
+    // Pad with nulls to match candles length
+    const padding = new Array(candles.length - adxValues.length).fill(null);
+    return [...padding, ...adxValues];
+  }
+
+  /**
    * Get latest indicator values
    */
   getLatestIndicators(candles) {
     const emaFast = this.calculateEMA(candles, Config.EMA_FAST);
     const emaSlow = this.calculateEMA(candles, Config.EMA_SLOW);
     const rsi = this.calculateRSI(candles, Config.RSI_PERIOD);
+    const adx = this.calculateADX(candles, 14);
 
     const lastCandle = candles[candles.length - 1];
     const lastEmaFast = emaFast[emaFast.length - 1];
     const lastEmaSlow = emaSlow[emaSlow.length - 1];
     const lastRSI = rsi[rsi.length - 1];
+    const lastADX = adx[adx.length - 1];
 
     return {
       price: lastCandle.close,
       emaFast: lastEmaFast,
       emaSlow: lastEmaSlow,
       rsi: lastRSI,
+      adx: lastADX ? lastADX.adx : null, // ADX returns object with {adx, pdi, mdi}
+      pdi: lastADX ? lastADX.pdi : null, // +DI (bullish directional indicator)
+      mdi: lastADX ? lastADX.mdi : null, // -DI (bearish directional indicator)
       time: lastCandle.time
     };
   }
@@ -290,6 +317,15 @@ class TechnicalAnalysis {
     this.logger.info(`EMA ${Config.EMA_FAST}: $${analysis.indicators.emaFast.toFixed(2)}`);
     this.logger.info(`EMA ${Config.EMA_SLOW}: $${analysis.indicators.emaSlow.toFixed(2)}`);
     this.logger.info(`RSI: ${analysis.indicators.rsi.toFixed(2)}`);
+
+    // ADX trend strength
+    const adx = analysis.indicators.adx;
+    const adxStatus = adx === null ? 'N/A' :
+      adx >= 25 ? `${adx.toFixed(1)} ✅ TRENDING` :
+      adx >= 20 ? `${adx.toFixed(1)} ⚠️ WEAK` :
+      `${adx.toFixed(1)} ❌ RANGING`;
+    this.logger.info(`ADX: ${adxStatus}`);
+
     this.logger.info(`Trend: ${analysis.trend}`);
     this.logger.info(`Pattern: ${analysis.pattern || 'None'}`);
     this.logger.info(`RSI Valid: ${analysis.rsiValid ? '✅' : '❌'}`);
