@@ -4,10 +4,10 @@
  * Entry Rules:
  * - LONG: 10 SMA crosses above 50 SMA
  *         + RSI > 50 (momentum confirmation)
- *         + ADX > 20 (trending market)
+ *         + ADX > 20 (trending market) OR breakout detected
  * - SHORT: 10 SMA crosses below 50 SMA
  *          + RSI < 50 (momentum confirmation)
- *          + ADX > 20 (trending market)
+ *          + ADX > 20 (trending market) OR breakout detected
  *
  * Exit Rules:
  * - Close position when price closes back through 50 SMA
@@ -15,6 +15,7 @@
  * Filters to avoid whipsaws:
  * - RSI must confirm direction (>50 for longs, <50 for shorts)
  * - ADX must be >20 to confirm trending (not ranging) market
+ * - BREAKOUT OVERRIDE: If price breaks recent range by X%, bypass ADX filter
  */
 import Config from './config.js';
 import fs from 'fs';
@@ -33,6 +34,10 @@ const SMA_FAST = 10;   // Fast SMA period (was 5)
 const SMA_SLOW = 50;   // Slow SMA period (was 20)
 const RSI_THRESHOLD = 50;  // RSI level for confirmation
 const ADX_MIN = 20;        // Minimum ADX for trending market
+
+// Breakout override parameters
+const BREAKOUT_LOOKBACK = 20;      // Number of candles to calculate range
+const BREAKOUT_THRESHOLD = 0.005;  // 0.5% breakout beyond range to override ADX
 
 class MACrossoverStrategy {
   constructor(logger, technicalAnalysis) {
@@ -105,6 +110,53 @@ class MACrossoverStrategy {
     const recentCandles = candles.slice(-period);
     const sum = recentCandles.reduce((total, candle) => total + candle.close, 0);
     return sum / period;
+  }
+
+  /**
+   * Check if price has broken out of recent range
+   * Returns: { isBreakout: boolean, direction: 'LONG' | 'SHORT' | null, details: string }
+   */
+  checkBreakout(candles, currentPrice) {
+    if (candles.length < BREAKOUT_LOOKBACK) {
+      return { isBreakout: false, direction: null, details: 'Insufficient candles for breakout check' };
+    }
+
+    // Get the range from the lookback period (excluding the most recent candle)
+    const lookbackCandles = candles.slice(-(BREAKOUT_LOOKBACK + 1), -1);
+
+    const rangeHigh = Math.max(...lookbackCandles.map(c => c.high));
+    const rangeLow = Math.min(...lookbackCandles.map(c => c.low));
+    const rangeSize = rangeHigh - rangeLow;
+
+    // Calculate breakout thresholds
+    const breakoutDistance = rangeHigh * BREAKOUT_THRESHOLD;
+    const bullishBreakoutLevel = rangeHigh + breakoutDistance;
+    const bearishBreakoutLevel = rangeLow - breakoutDistance;
+
+    // Check for breakout
+    if (currentPrice > bullishBreakoutLevel) {
+      const breakoutPercent = ((currentPrice - rangeHigh) / rangeHigh * 100).toFixed(2);
+      return {
+        isBreakout: true,
+        direction: 'LONG',
+        details: `Bullish breakout: Price $${currentPrice.toFixed(2)} > Range high $${rangeHigh.toFixed(2)} + ${(BREAKOUT_THRESHOLD * 100).toFixed(1)}% (+${breakoutPercent}%)`
+      };
+    }
+
+    if (currentPrice < bearishBreakoutLevel) {
+      const breakoutPercent = ((rangeLow - currentPrice) / rangeLow * 100).toFixed(2);
+      return {
+        isBreakout: true,
+        direction: 'SHORT',
+        details: `Bearish breakout: Price $${currentPrice.toFixed(2)} < Range low $${rangeLow.toFixed(2)} - ${(BREAKOUT_THRESHOLD * 100).toFixed(1)}% (-${breakoutPercent}%)`
+      };
+    }
+
+    return {
+      isBreakout: false,
+      direction: null,
+      details: `No breakout. Range: $${rangeLow.toFixed(2)} - $${rangeHigh.toFixed(2)}, Price: $${currentPrice.toFixed(2)}`
+    };
   }
 
   /**
@@ -181,19 +233,30 @@ class MACrossoverStrategy {
     const bullishCrossover = this.previousSMAFast <= this.previousSMASlow && smaFast > smaSlow;
     const bearishCrossover = this.previousSMAFast >= this.previousSMASlow && smaFast < smaSlow;
 
+    // Check for breakout (used to override ADX filter)
+    const breakout = this.checkBreakout(candles, currentPrice);
+
     if (bullishCrossover) {
       signal = 'LONG';
       reason = `Bullish crossover: ${SMA_FAST} SMA ($${smaFast.toFixed(2)}) crossed above ${SMA_SLOW} SMA ($${smaSlow.toFixed(2)})`;
 
-      // Apply filters
+      // Apply RSI filter (always required)
       if (rsi !== null && rsi <= RSI_THRESHOLD) {
         filters.push(`RSI ${rsi.toFixed(1)} ≤ ${RSI_THRESHOLD} (weak momentum)`);
         signal = null;
       }
 
+      // Apply ADX filter (can be overridden by breakout)
       if (adx !== null && adx < ADX_MIN) {
-        filters.push(`ADX ${adx.toFixed(1)} < ${ADX_MIN} (ranging market)`);
-        signal = null;
+        // Check if breakout overrides ADX filter
+        if (breakout.isBreakout && breakout.direction === 'LONG') {
+          this.logger.info(`🚀 BREAKOUT OVERRIDE: ${breakout.details}`);
+          reason += ` [BREAKOUT OVERRIDE - ADX ${adx.toFixed(1)} bypassed]`;
+          // Don't nullify signal - breakout overrides ADX
+        } else {
+          filters.push(`ADX ${adx.toFixed(1)} < ${ADX_MIN} (ranging market, no breakout)`);
+          signal = null;
+        }
       }
 
       // Adjust confidence based on conditions
@@ -201,6 +264,7 @@ class MACrossoverStrategy {
         if (currentPrice > smaSlow) confidence += 10;
         if (rsi !== null && rsi > 55) confidence += 10;
         if (adx !== null && adx > 25) confidence += 10;
+        if (breakout.isBreakout) confidence += 15; // Bonus for breakout
         const separation = smaFast - smaSlow;
         if (separation > 5) confidence += 5;
       }
@@ -209,15 +273,23 @@ class MACrossoverStrategy {
       signal = 'SHORT';
       reason = `Bearish crossover: ${SMA_FAST} SMA ($${smaFast.toFixed(2)}) crossed below ${SMA_SLOW} SMA ($${smaSlow.toFixed(2)})`;
 
-      // Apply filters
+      // Apply RSI filter (always required)
       if (rsi !== null && rsi >= RSI_THRESHOLD) {
         filters.push(`RSI ${rsi.toFixed(1)} ≥ ${RSI_THRESHOLD} (weak momentum)`);
         signal = null;
       }
 
+      // Apply ADX filter (can be overridden by breakout)
       if (adx !== null && adx < ADX_MIN) {
-        filters.push(`ADX ${adx.toFixed(1)} < ${ADX_MIN} (ranging market)`);
-        signal = null;
+        // Check if breakout overrides ADX filter
+        if (breakout.isBreakout && breakout.direction === 'SHORT') {
+          this.logger.info(`🚀 BREAKOUT OVERRIDE: ${breakout.details}`);
+          reason += ` [BREAKOUT OVERRIDE - ADX ${adx.toFixed(1)} bypassed]`;
+          // Don't nullify signal - breakout overrides ADX
+        } else {
+          filters.push(`ADX ${adx.toFixed(1)} < ${ADX_MIN} (ranging market, no breakout)`);
+          signal = null;
+        }
       }
 
       // Adjust confidence based on conditions
@@ -225,6 +297,7 @@ class MACrossoverStrategy {
         if (currentPrice < smaSlow) confidence += 10;
         if (rsi !== null && rsi < 45) confidence += 10;
         if (adx !== null && adx > 25) confidence += 10;
+        if (breakout.isBreakout) confidence += 15; // Bonus for breakout
         const separation = smaSlow - smaFast;
         if (separation > 5) confidence += 5;
       }
@@ -344,9 +417,10 @@ class MACrossoverStrategy {
 
       Entry: ${SMA_FAST} SMA crosses ${SMA_SLOW} SMA
       Filters: RSI ${RSI_THRESHOLD} confirmation, ADX > ${ADX_MIN}
+      Breakout Override: ${(BREAKOUT_THRESHOLD * 100).toFixed(1)}% beyond ${BREAKOUT_LOOKBACK}-candle range bypasses ADX
       Exit: Price closes back through ${SMA_SLOW} SMA
 
-      Enhanced trend-following with momentum & trend filters
+      Enhanced trend-following with momentum, trend filters & breakout detection
     `.trim();
   }
 }
