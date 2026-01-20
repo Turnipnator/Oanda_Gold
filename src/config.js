@@ -62,7 +62,7 @@ class Config {
   static MIN_CONFIDENCE = parseFloat(process.env.MIN_CONFIDENCE || '70'); // Skip setups below 70% confidence
 
   // Strategy Selection
-  static STRATEGY_TYPE = process.env.STRATEGY_TYPE || 'triple_confirmation'; // 'triple_confirmation' or 'ma_crossover'
+  static STRATEGY_TYPE = process.env.STRATEGY_TYPE || 'breakout_adx'; // 'breakout_adx' (recommended) or 'triple_confirmation'
 
   // Bot Identification
   static BOT_NAME = process.env.BOT_NAME || 'Gold Bot'; // Used for logging and notifications

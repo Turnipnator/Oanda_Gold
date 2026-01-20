@@ -11,7 +11,7 @@ import logger from './logger.js';
 import OandaClient from './oanda_client.js';
 import TechnicalAnalysis from './technical_analysis.js';
 import TripleConfirmationStrategy from './strategy.js';
-import MACrossoverStrategy from './ma_crossover_strategy.js';
+import BreakoutADXStrategy from './breakout_adx_strategy.js';
 import RiskManager from './risk_manager.js';
 import GoldTelegramBot from './telegram_bot.js';
 import StrategyTracker from './strategy_tracker.js';
@@ -35,24 +35,25 @@ class GoldTradingBot {
 
     // Initialize BOTH strategies for comparison
     this.tripleStrategy = new TripleConfirmationStrategy(logger, this.ta);
-    this.maStrategy = new MACrossoverStrategy(logger, this.ta);
+    this.breakoutStrategy = new BreakoutADXStrategy(logger, this.ta);
 
     // Determine which strategy trades live (from config)
-    const liveStrategyName = Config.STRATEGY_TYPE === 'ma_crossover'
-      ? 'MA Crossover (5/20)'
-      : 'Triple Confirmation';
+    // Options: 'breakout_adx' (default/recommended) or 'triple_confirmation'
+    const liveStrategyName = Config.STRATEGY_TYPE === 'triple_confirmation'
+      ? 'Triple Confirmation'
+      : 'Breakout + ADX';
 
-    this.liveStrategy = Config.STRATEGY_TYPE === 'ma_crossover'
-      ? this.maStrategy
-      : this.tripleStrategy;
+    this.liveStrategy = Config.STRATEGY_TYPE === 'triple_confirmation'
+      ? this.tripleStrategy
+      : this.breakoutStrategy;
 
     // Initialize strategy tracker
     this.tracker = new StrategyTracker();
+    this.tracker.registerStrategy('Breakout + ADX', liveStrategyName === 'Breakout + ADX');
     this.tracker.registerStrategy('Triple Confirmation', liveStrategyName === 'Triple Confirmation');
-    this.tracker.registerStrategy('MA Crossover (5/20)', liveStrategyName === 'MA Crossover (5/20)');
 
     logger.info(`🟢 LIVE Strategy: ${liveStrategyName}`);
-    logger.info(`📝 HYPOTHETICAL Strategy: ${liveStrategyName === 'Triple Confirmation' ? 'MA Crossover (5/20)' : 'Triple Confirmation'}`);
+    logger.info(`📝 HYPOTHETICAL Strategy: ${liveStrategyName === 'Breakout + ADX' ? 'Triple Confirmation' : 'Breakout + ADX'}`);
 
     this.riskManager = new RiskManager(logger, this.client);
 
@@ -214,7 +215,7 @@ class GoldTradingBot {
       logger.info(this.liveStrategy.getDescription().split('\n').map(l => '   ' + l).join('\n'));
       logger.info('');
       logger.info('📝 HYPOTHETICAL STRATEGY (Tracking Only):');
-      const hypotheticalStrategy = this.liveStrategy === this.tripleStrategy ? this.maStrategy : this.tripleStrategy;
+      const hypotheticalStrategy = this.liveStrategy === this.tripleStrategy ? this.breakoutStrategy : this.tripleStrategy;
       logger.info('   ' + hypotheticalStrategy.name);
       logger.info(hypotheticalStrategy.getDescription().split('\n').map(l => '   ' + l).join('\n'));
       logger.info('');
@@ -398,22 +399,22 @@ class GoldTradingBot {
 
       // Evaluate BOTH strategies
       const tripleSetup = this.tripleStrategy.evaluateSetup(analysis);
-      const maSetup = this.maStrategy.evaluateSetup(analysis, candles);
+      const breakoutSetup = this.breakoutStrategy.evaluateSetup(analysis, candles);
 
       logger.info('');
       logger.info('─'.repeat(70));
       logger.info('📊 STRATEGY EVALUATION RESULTS:');
       logger.info('─'.repeat(70));
-      logger.info(`🟢 Triple Confirmation: ${tripleSetup.signal || 'NO SIGNAL'} (${tripleSetup.confidence}%) - ${tripleSetup.reason}`);
-      logger.info(`📝 MA Crossover (5/20): ${maSetup.signal || 'NO SIGNAL'} (${maSetup.confidence}%) - ${maSetup.reason}`);
+      logger.info(`🟢 Breakout + ADX: ${breakoutSetup.signal || 'NO SIGNAL'} (${breakoutSetup.confidence}%) - ${breakoutSetup.reason}`);
+      logger.info(`📝 Triple Confirmation: ${tripleSetup.signal || 'NO SIGNAL'} (${tripleSetup.confidence}%) - ${tripleSetup.reason}`);
       logger.info('─'.repeat(70));
       logger.info('');
 
       // Determine which setup to use for live trading
-      const liveSetup = this.liveStrategy === this.tripleStrategy ? tripleSetup : maSetup;
-      const hypotheticalSetup = this.liveStrategy === this.tripleStrategy ? maSetup : tripleSetup;
-      const liveStrategyName = this.liveStrategy === this.tripleStrategy ? 'Triple Confirmation' : 'MA Crossover (5/20)';
-      const hypotheticalStrategyName = this.liveStrategy === this.tripleStrategy ? 'MA Crossover (5/20)' : 'Triple Confirmation';
+      const liveSetup = this.liveStrategy === this.breakoutStrategy ? breakoutSetup : tripleSetup;
+      const hypotheticalSetup = this.liveStrategy === this.breakoutStrategy ? tripleSetup : breakoutSetup;
+      const liveStrategyName = this.liveStrategy === this.breakoutStrategy ? 'Breakout + ADX' : 'Triple Confirmation';
+      const hypotheticalStrategyName = this.liveStrategy === this.breakoutStrategy ? 'Triple Confirmation' : 'Breakout + ADX';
 
       // Check if live strategy has a signal
       if (!liveSetup.signal) {
@@ -446,9 +447,7 @@ class GoldTradingBot {
       }
 
       // Calculate entry levels for LIVE strategy
-      const levels = this.liveStrategy === this.maStrategy
-        ? this.liveStrategy.calculateEntryLevels(analysis, liveSetup.signal, maSetup.sma20)
-        : this.liveStrategy.calculateEntryLevels(analysis, liveSetup.signal);
+      const levels = this.liveStrategy.calculateEntryLevels(analysis, liveSetup.signal);
 
       // Calculate position size
       const positionSize = this.riskManager.calculatePositionSize(
@@ -484,9 +483,9 @@ class GoldTradingBot {
         logger.info(`📝 HYPOTHETICAL (${hypotheticalStrategyName}): Would also enter ${hypotheticalSetup.signal} at ${hypotheticalSetup.confidence}% confidence`);
 
         // Calculate hypothetical entry levels
-        const hypotheticalLevels = this.liveStrategy === this.tripleStrategy
-          ? this.maStrategy.calculateEntryLevels(analysis, hypotheticalSetup.signal, maSetup.sma20)
-          : this.tripleStrategy.calculateEntryLevels(analysis, hypotheticalSetup.signal);
+        const hypotheticalLevels = this.liveStrategy === this.breakoutStrategy
+          ? this.tripleStrategy.calculateEntryLevels(analysis, hypotheticalSetup.signal)
+          : this.breakoutStrategy.calculateEntryLevels(analysis, hypotheticalSetup.signal);
 
         // Track hypothetical trade
         this.tracker.recordSignal(
