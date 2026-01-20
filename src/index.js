@@ -527,7 +527,9 @@ class GoldTradingBot {
       logger.info(`Entry: $${levels.entryPrice.toFixed(2)}`);
       logger.info(`Stop Loss: $${levels.stopLoss.toFixed(2)}`);
 
-      if (Config.ENABLE_STAGED_TP) {
+      if (Config.TRAILING_ONLY) {
+        logger.info(`Take Profit: NONE (trailing stop only @ ${Config.TRAILING_STOP_DISTANCE_PIPS} pips)`);
+      } else if (Config.ENABLE_STAGED_TP) {
         logger.info(`Take Profit 1: $${levels.takeProfit1.toFixed(2)} (60%)`);
         logger.info(`Take Profit 2: $${levels.takeProfit2.toFixed(2)} (40%)`);
       } else {
@@ -535,8 +537,15 @@ class GoldTradingBot {
       }
       logger.info('');
 
-      // Place market order - include TP if single TP mode, otherwise just SL
-      const takeProfit = Config.ENABLE_STAGED_TP ? null : levels.takeProfit1;
+      // Place market order
+      // - TRAILING_ONLY: No TP, just SL (trailing will manage exit)
+      // - STAGED_TP: No TP on order, managed manually
+      // - Otherwise: Single TP on order
+      let takeProfit = null;
+      if (!Config.TRAILING_ONLY && !Config.ENABLE_STAGED_TP) {
+        takeProfit = levels.takeProfit1;
+      }
+
       const order = await this.client.placeMarketOrder(
         Config.TRADING_SYMBOL,
         units,
@@ -552,8 +561,10 @@ class GoldTradingBot {
         return;
       }
 
-      if (Config.ENABLE_STAGED_TP) {
-        // Staged TP: TP will be managed manually for partial exits
+      if (Config.TRAILING_ONLY) {
+        logger.info(`📊 NO fixed TP - Trailing stop at ${Config.TRAILING_STOP_DISTANCE_PIPS} pips ($${(Config.TRAILING_STOP_DISTANCE_PIPS * 0.01).toFixed(2)}) will manage exit`);
+        logger.info(`🎯 Let winners run! Trail follows price, locks in profit as it moves.`);
+      } else if (Config.ENABLE_STAGED_TP) {
         logger.info(`📊 TP1 target: $${levels.takeProfit1.toFixed(2)} (will close 60%)`);
         logger.info(`📊 TP2 target: $${levels.takeProfit2.toFixed(2)} (will close 40%)`);
       } else {
@@ -734,8 +745,9 @@ class GoldTradingBot {
         }
 
         // Trailing stop logic - activates when:
-        // 1. After TP1 is hit, OR
-        // 2. When price has moved favorably by at least the trailing distance (early profit protection)
+        // 1. TRAILING_ONLY mode (always active - this is the exit strategy), OR
+        // 2. After TP1 is hit, OR
+        // 3. When price has moved favorably by at least the trailing distance (early profit protection)
         if (Config.ENABLE_TRAILING_STOP) {
           const currentPrice = await this.client.getPrice(trade.instrument);
           const price = currentPrice.mid;
@@ -748,9 +760,10 @@ class GoldTradingBot {
             : tracked.entryPrice - price;
 
           // Activate trailing when:
+          // - TRAILING_ONLY mode (no fixed TP, trailing IS the exit), OR
           // - TP1 already hit, OR
-          // - Price moved in our favor by at least the trailing distance (e.g., $2.00)
-          const shouldTrail = tracked.tp1Hit || profitMove >= trailDistance;
+          // - Price moved in our favor by at least the trailing distance
+          const shouldTrail = Config.TRAILING_ONLY || tracked.tp1Hit || profitMove >= trailDistance;
 
           if (shouldTrail) {
             // Update best price if price moved favorably

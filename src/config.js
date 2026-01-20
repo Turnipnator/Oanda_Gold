@@ -70,15 +70,20 @@ class Config {
   // Entry & Exit Rules
   // For gold: 1 pip = $0.01, so 200 pips = $2.00 stop loss (optimized from backtest)
   static STOP_LOSS_PIPS = parseFloat(process.env.STOP_LOSS_PIPS || '200');
-  static TAKE_PROFIT_RR = parseFloat(process.env.TAKE_PROFIT_RR || '2.5'); // Single TP at 2.5R ($5.00)
-  static ENABLE_STAGED_TP = process.env.ENABLE_STAGED_TP === 'true'; // false = single TP (recommended for breakouts)
+
+  // Take Profit Mode:
+  // TRAILING_ONLY=true: No fixed TP, let winners run with trailing stop (aggressive, for trends)
+  // TRAILING_ONLY=false: Use fixed TP (safer, more predictable)
+  static TRAILING_ONLY = process.env.TRAILING_ONLY === 'true'; // true = no TP, trail only
+  static TAKE_PROFIT_RR = parseFloat(process.env.TAKE_PROFIT_RR || '2.5'); // Only used if TRAILING_ONLY=false
+  static ENABLE_STAGED_TP = process.env.ENABLE_STAGED_TP === 'true'; // false = single TP (if not trailing only)
   static TAKE_PROFIT_1_RR = parseFloat(process.env.TAKE_PROFIT_1_RR || '1.5'); // Only used if ENABLE_STAGED_TP=true
   static TAKE_PROFIT_2_RR = parseFloat(process.env.TAKE_PROFIT_2_RR || '2.5'); // Only used if ENABLE_STAGED_TP=true
   static MOVE_STOP_TO_BE = process.env.MOVE_STOP_TO_BE !== 'false';
 
-  // Trailing Stop (for remaining position after TP1)
+  // Trailing Stop
   static ENABLE_TRAILING_STOP = process.env.ENABLE_TRAILING_STOP !== 'false';
-  static TRAILING_STOP_DISTANCE_PIPS = parseFloat(process.env.TRAILING_STOP_DISTANCE_PIPS || '200'); // $2.00 trail distance
+  static TRAILING_STOP_DISTANCE_PIPS = parseFloat(process.env.TRAILING_STOP_DISTANCE_PIPS || '150'); // $1.50 trail distance
 
   // Position Sizing (Oanda uses units: 1 unit = $1 worth of gold)
   static MIN_POSITION_SIZE = parseInt(process.env.MIN_POSITION_SIZE || '100');

@@ -337,9 +337,14 @@ class BreakoutADXStrategy {
    * Get strategy description
    */
   getDescription() {
-    const tpDesc = Config.ENABLE_STAGED_TP
-      ? `Take Profit: ${Config.TAKE_PROFIT_1_RR}R (60%) / ${Config.TAKE_PROFIT_2_RR}R (40%)`
-      : `Take Profit: Single ${Config.TAKE_PROFIT_RR}R`;
+    let tpDesc;
+    if (Config.TRAILING_ONLY) {
+      tpDesc = `Take Profit: NONE (Trail ${Config.TRAILING_STOP_DISTANCE_PIPS} pips only - let winners run!)`;
+    } else if (Config.ENABLE_STAGED_TP) {
+      tpDesc = `Take Profit: ${Config.TAKE_PROFIT_1_RR}R (60%) / ${Config.TAKE_PROFIT_2_RR}R (40%)`;
+    } else {
+      tpDesc = `Take Profit: Single ${Config.TAKE_PROFIT_RR}R`;
+    }
 
     return `
       ${this.name}
