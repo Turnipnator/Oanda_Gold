@@ -293,20 +293,28 @@ class BreakoutADXStrategy {
 
     const entryPrice = currentPrice;
 
-    // Stop Loss - fixed 300 pips ($3.00)
+    // Stop Loss
     const stopPips = Config.STOP_LOSS_PIPS;
     const stopDistance = Config.pipsToPrice(stopPips);
     const stopLoss = isLong ? entryPrice - stopDistance : entryPrice + stopDistance;
 
-    // Take Profits - 1.5R and 2.5R
     const riskDistance = Math.abs(entryPrice - stopLoss);
-    const tp1Distance = riskDistance * Config.TAKE_PROFIT_1_RR;
-    const tp2Distance = riskDistance * Config.TAKE_PROFIT_2_RR;
-
-    const takeProfit1 = isLong ? entryPrice + tp1Distance : entryPrice - tp1Distance;
-    const takeProfit2 = isLong ? entryPrice + tp2Distance : entryPrice - tp2Distance;
-
     const riskPips = Config.priceToPips(riskDistance);
+
+    let takeProfit1, takeProfit2;
+
+    if (Config.ENABLE_STAGED_TP) {
+      // Staged TP: TP1 at 1.5R (close 60%), TP2 at 2.5R (close 40%)
+      const tp1Distance = riskDistance * Config.TAKE_PROFIT_1_RR;
+      const tp2Distance = riskDistance * Config.TAKE_PROFIT_2_RR;
+      takeProfit1 = isLong ? entryPrice + tp1Distance : entryPrice - tp1Distance;
+      takeProfit2 = isLong ? entryPrice + tp2Distance : entryPrice - tp2Distance;
+    } else {
+      // Single TP: Both set to same target (2.5R)
+      const tpDistance = riskDistance * Config.TAKE_PROFIT_RR;
+      takeProfit1 = isLong ? entryPrice + tpDistance : entryPrice - tpDistance;
+      takeProfit2 = takeProfit1; // Same as TP1 for single TP mode
+    }
 
     this.logger.strategy('Breakout+ADX entry levels calculated', {
       entryPrice: entryPrice.toFixed(2),

@@ -526,15 +526,22 @@ class GoldTradingBot {
       logger.info(`Units: ${Math.abs(units)}`);
       logger.info(`Entry: $${levels.entryPrice.toFixed(2)}`);
       logger.info(`Stop Loss: $${levels.stopLoss.toFixed(2)}`);
-      logger.info(`Take Profit 1: $${levels.takeProfit1.toFixed(2)}`);
-      logger.info(`Take Profit 2: $${levels.takeProfit2.toFixed(2)}`);
+
+      if (Config.ENABLE_STAGED_TP) {
+        logger.info(`Take Profit 1: $${levels.takeProfit1.toFixed(2)} (60%)`);
+        logger.info(`Take Profit 2: $${levels.takeProfit2.toFixed(2)} (40%)`);
+      } else {
+        logger.info(`Take Profit: $${levels.takeProfit1.toFixed(2)} (single TP @ ${Config.TAKE_PROFIT_RR}R)`);
+      }
       logger.info('');
 
-      // Place market order with stop loss only
+      // Place market order - include TP if single TP mode, otherwise just SL
+      const takeProfit = Config.ENABLE_STAGED_TP ? null : levels.takeProfit1;
       const order = await this.client.placeMarketOrder(
         Config.TRADING_SYMBOL,
         units,
-        levels.stopLoss
+        levels.stopLoss,
+        takeProfit
       );
 
       if (!order.success) {
@@ -545,11 +552,13 @@ class GoldTradingBot {
         return;
       }
 
-      // Note: TP will be managed manually for partial exits
-      // We'll close 60% at TP1, then 40% at TP2
-      logger.info(`📊 TP1 target: $${levels.takeProfit1.toFixed(2)} (will close 60%)`);
-      logger.info(`📊 TP2 target: $${levels.takeProfit2.toFixed(2)} (will close 40%)`);
-
+      if (Config.ENABLE_STAGED_TP) {
+        // Staged TP: TP will be managed manually for partial exits
+        logger.info(`📊 TP1 target: $${levels.takeProfit1.toFixed(2)} (will close 60%)`);
+        logger.info(`📊 TP2 target: $${levels.takeProfit2.toFixed(2)} (will close 40%)`);
+      } else {
+        logger.info(`📊 TP set at $${levels.takeProfit1.toFixed(2)} (Oanda will close automatically)`);
+      }
 
       logger.info('');
       logger.info('✅ TRADE OPENED SUCCESSFULLY!');
@@ -639,8 +648,9 @@ class GoldTradingBot {
 
         logger.info(`📍 Monitoring trade ${trade.tradeId}: ${trade.units} units @ $${trade.price.toFixed(2)}, P&L: $${trade.unrealizedPL.toFixed(2)}`);
 
-        // Check if TP1 was hit - close 60% and move stop to breakeven
-        if (!tracked.tp1Hit) {
+        // Staged TP logic - only runs when ENABLE_STAGED_TP is true
+        // When single TP mode is used, Oanda handles TP automatically
+        if (Config.ENABLE_STAGED_TP && !tracked.tp1Hit) {
           const currentPrice = await this.client.getPrice(trade.instrument);
           const price = currentPrice.mid;
 

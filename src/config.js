@@ -68,10 +68,12 @@ class Config {
   static BOT_NAME = process.env.BOT_NAME || 'Gold Bot'; // Used for logging and notifications
 
   // Entry & Exit Rules
-  // For gold: 1 pip = $0.01, so 300 pips = $3.00 stop loss (reasonable for gold volatility)
-  static STOP_LOSS_PIPS = parseFloat(process.env.STOP_LOSS_PIPS || '300');
-  static TAKE_PROFIT_1_RR = parseFloat(process.env.TAKE_PROFIT_1_RR || '1.5');
-  static TAKE_PROFIT_2_RR = parseFloat(process.env.TAKE_PROFIT_2_RR || '2.5');
+  // For gold: 1 pip = $0.01, so 200 pips = $2.00 stop loss (optimized from backtest)
+  static STOP_LOSS_PIPS = parseFloat(process.env.STOP_LOSS_PIPS || '200');
+  static TAKE_PROFIT_RR = parseFloat(process.env.TAKE_PROFIT_RR || '2.5'); // Single TP at 2.5R ($5.00)
+  static ENABLE_STAGED_TP = process.env.ENABLE_STAGED_TP === 'true'; // false = single TP (recommended for breakouts)
+  static TAKE_PROFIT_1_RR = parseFloat(process.env.TAKE_PROFIT_1_RR || '1.5'); // Only used if ENABLE_STAGED_TP=true
+  static TAKE_PROFIT_2_RR = parseFloat(process.env.TAKE_PROFIT_2_RR || '2.5'); // Only used if ENABLE_STAGED_TP=true
   static MOVE_STOP_TO_BE = process.env.MOVE_STOP_TO_BE !== 'false';
 
   // Trailing Stop (for remaining position after TP1)

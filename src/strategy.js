@@ -238,11 +238,20 @@ class TripleConfirmationStrategy {
     const riskPips = Config.priceToPips(riskDistance);
 
     // Take Profit targets
-    const tp1Distance = riskDistance * Config.TAKE_PROFIT_1_RR;
-    const tp2Distance = riskDistance * Config.TAKE_PROFIT_2_RR;
+    let takeProfit1, takeProfit2;
 
-    const takeProfit1 = isLong ? entryPrice + tp1Distance : entryPrice - tp1Distance;
-    const takeProfit2 = isLong ? entryPrice + tp2Distance : entryPrice - tp2Distance;
+    if (Config.ENABLE_STAGED_TP) {
+      // Staged TP: TP1 at 1.5R (close 60%), TP2 at 2.5R (close 40%)
+      const tp1Distance = riskDistance * Config.TAKE_PROFIT_1_RR;
+      const tp2Distance = riskDistance * Config.TAKE_PROFIT_2_RR;
+      takeProfit1 = isLong ? entryPrice + tp1Distance : entryPrice - tp1Distance;
+      takeProfit2 = isLong ? entryPrice + tp2Distance : entryPrice - tp2Distance;
+    } else {
+      // Single TP: Both set to same target
+      const tpDistance = riskDistance * Config.TAKE_PROFIT_RR;
+      takeProfit1 = isLong ? entryPrice + tpDistance : entryPrice - tpDistance;
+      takeProfit2 = takeProfit1;
+    }
 
     this.logger.strategy('Entry levels calculated', {
       entryPrice: entryPrice.toFixed(2),
