@@ -337,14 +337,18 @@ class BreakoutADXStrategy {
    * Get strategy description
    */
   getDescription() {
+    const tpDesc = Config.ENABLE_STAGED_TP
+      ? `Take Profit: ${Config.TAKE_PROFIT_1_RR}R (60%) / ${Config.TAKE_PROFIT_2_RR}R (40%)`
+      : `Take Profit: Single ${Config.TAKE_PROFIT_RR}R`;
+
     return `
       ${this.name}
 
       Entry: Price breaks ${BREAKOUT_LOOKBACK}-bar high/low (Donchian Channel)
       Filter: ADX > ${ADX_MIN} (trending market)
       Confirmation: Bullish candle for longs, bearish for shorts
-      Stop Loss: ${Config.STOP_LOSS_PIPS} pips
-      Take Profit: ${Config.TAKE_PROFIT_1_RR}R / ${Config.TAKE_PROFIT_2_RR}R
+      Stop Loss: ${Config.STOP_LOSS_PIPS} pips ($${(Config.STOP_LOSS_PIPS * 0.01).toFixed(2)})
+      ${tpDesc}
 
       Trend-following breakout strategy with ADX confirmation
     `.trim();
