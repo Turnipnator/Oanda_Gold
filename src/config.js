@@ -68,8 +68,9 @@ class Config {
   static BOT_NAME = process.env.BOT_NAME || 'Gold Bot'; // Used for logging and notifications
 
   // Entry & Exit Rules
-  // For gold: 1 pip = $0.01, so 200 pips = $2.00 stop loss (optimized from backtest)
-  static STOP_LOSS_PIPS = parseFloat(process.env.STOP_LOSS_PIPS || '200');
+  // For gold: 1 pip = $0.01, so 350 pips = $3.50 stop loss
+  // Increased from 200 to 350 on Jan 21 2026 - 200 was too tight for live spreads
+  static STOP_LOSS_PIPS = parseFloat(process.env.STOP_LOSS_PIPS || '350');
 
   // Take Profit Mode:
   // TRAILING_ONLY=true: No fixed TP, let winners run with trailing stop (aggressive, for trends)
