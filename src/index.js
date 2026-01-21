@@ -374,7 +374,7 @@ class GoldTradingBot {
     try {
       logger.info('🔍 Scanning market for setups...');
 
-      // Get historical candles
+      // Get historical candles (H4 - main timeframe)
       const allCandles = await this.client.getCandles(
         Config.TRADING_SYMBOL,
         Config.TIMEFRAME,
@@ -386,20 +386,32 @@ class GoldTradingBot {
       // which can trigger false crossover signals
       const candles = allCandles.filter(c => c.complete);
 
-      logger.debug(`📊 Candles: ${allCandles.length} total, ${candles.length} complete`);
+      logger.debug(`📊 H4 Candles: ${allCandles.length} total, ${candles.length} complete`);
 
       if (candles.length < 100) {
         logger.warn('Insufficient candle data');
         return;
       }
 
+      // Fetch H1 candles for MTF entry timing (if enabled)
+      let h1Candles = null;
+      if (Config.ENABLE_MTF) {
+        const allH1Candles = await this.client.getCandles(
+          Config.TRADING_SYMBOL,
+          Config.MTF_ENTRY_TIMEFRAME,
+          100
+        );
+        h1Candles = allH1Candles.filter(c => c.complete);
+        logger.debug(`📊 H1 Candles: ${allH1Candles.length} total, ${h1Candles.length} complete`);
+      }
+
       // Perform technical analysis (uses completed candles for accurate indicators)
       const analysis = this.ta.analyze(candles);
       this.ta.logAnalysis(analysis);
 
-      // Evaluate BOTH strategies
+      // Evaluate BOTH strategies (pass H1 candles to breakout strategy for MTF)
       const tripleSetup = this.tripleStrategy.evaluateSetup(analysis);
-      const breakoutSetup = this.breakoutStrategy.evaluateSetup(analysis, candles);
+      const breakoutSetup = this.breakoutStrategy.evaluateSetup(analysis, candles, h1Candles);
 
       logger.info('');
       logger.info('─'.repeat(70));
@@ -447,7 +459,9 @@ class GoldTradingBot {
       }
 
       // Calculate entry levels for LIVE strategy
-      const levels = this.liveStrategy.calculateEntryLevels(analysis, liveSetup.signal);
+      // Use MTF entry price if available (better entry from H1 pullback)
+      const mtfEntryPrice = liveSetup.isMTFEntry ? liveSetup.entryPrice : null;
+      const levels = this.liveStrategy.calculateEntryLevels(analysis, liveSetup.signal, mtfEntryPrice);
 
       // Calculate position size
       const positionSize = this.riskManager.calculatePositionSize(

@@ -64,6 +64,14 @@ class Config {
   // Strategy Selection
   static STRATEGY_TYPE = process.env.STRATEGY_TYPE || 'breakout_adx'; // 'breakout_adx' (recommended) or 'triple_confirmation'
 
+  // Multi-Timeframe (MTF) Settings
+  // Uses H4 for direction, H1 for entry timing (better entries, higher win rate)
+  static ENABLE_MTF = process.env.ENABLE_MTF !== 'false'; // true by default
+  static MTF_ENTRY_TIMEFRAME = process.env.MTF_ENTRY_TIMEFRAME || 'H1'; // Entry timing timeframe
+  static MTF_PULLBACK_PIPS = parseFloat(process.env.MTF_PULLBACK_PIPS || '100'); // Wait for $1.00 pullback
+  static MTF_MAX_WAIT_CANDLES = parseInt(process.env.MTF_MAX_WAIT_CANDLES || '8'); // Max H1 candles to wait (8 hours)
+  static MTF_EMA_PERIOD = parseInt(process.env.MTF_EMA_PERIOD || '20'); // EMA period on entry timeframe
+
   // Bot Identification
   static BOT_NAME = process.env.BOT_NAME || 'Gold Bot'; // Used for logging and notifications
 
