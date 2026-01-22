@@ -575,6 +575,24 @@ class GoldTradingBot {
         return;
       }
 
+      // Recalculate SL based on actual fill price (not theoretical entry price)
+      // The calculated SL may be wrong if fill price differs from analysis price
+      const isLong = signal === 'LONG';
+      const stopDistance = Config.pipsToPrice(Config.STOP_LOSS_PIPS);
+      const correctStopLoss = isLong
+        ? order.price - stopDistance
+        : order.price + stopDistance;
+
+      if (Math.abs(correctStopLoss - levels.stopLoss) > 0.01) {
+        logger.info(`🔧 Adjusting SL from $${levels.stopLoss.toFixed(2)} to $${correctStopLoss.toFixed(2)} (based on fill price $${order.price.toFixed(2)})`);
+        try {
+          await this.client.modifyTrade(order.tradeId, correctStopLoss, null);
+          levels.stopLoss = correctStopLoss;
+        } catch (slError) {
+          logger.warn(`Failed to adjust SL: ${slError.message} - keeping original SL`);
+        }
+      }
+
       if (Config.TRAILING_ONLY) {
         logger.info(`📊 NO fixed TP - Trailing stop at ${Config.TRAILING_STOP_DISTANCE_PIPS} pips ($${(Config.TRAILING_STOP_DISTANCE_PIPS * 0.01).toFixed(2)}) will manage exit`);
         logger.info(`🎯 Let winners run! Trail follows price, locks in profit as it moves.`);
@@ -758,10 +776,10 @@ class GoldTradingBot {
           }
         }
 
-        // Trailing stop logic - activates when:
-        // 1. TRAILING_ONLY mode (always active - this is the exit strategy), OR
-        // 2. After TP1 is hit, OR
-        // 3. When price has moved favorably by at least the trailing distance (early profit protection)
+        // Trailing stop logic - activates when price has moved enough in our favor:
+        // 1. After TP1 is hit (staged TP mode), OR
+        // 2. After price moves by TRAILING_ACTIVATION_PIPS in our favor
+        // This prevents trailing from triggering too early and closing at breakeven
         if (Config.ENABLE_TRAILING_STOP) {
           const currentPrice = await this.client.getPrice(trade.instrument);
           const price = currentPrice.mid;
@@ -774,10 +792,10 @@ class GoldTradingBot {
             : tracked.entryPrice - price;
 
           // Activate trailing when:
-          // - TRAILING_ONLY mode (no fixed TP, trailing IS the exit), OR
-          // - TP1 already hit, OR
-          // - Price moved in our favor by at least the trailing distance
-          const shouldTrail = Config.TRAILING_ONLY || tracked.tp1Hit || profitMove >= trailDistance;
+          // - TP1 already hit (staged TP mode), OR
+          // - Price moved in our favor by activation threshold (default $2.00)
+          const activationDistance = Config.pipsToPrice(Config.TRAILING_ACTIVATION_PIPS);
+          const shouldTrail = tracked.tp1Hit || profitMove >= activationDistance;
 
           if (shouldTrail) {
             // Update best price if price moved favorably

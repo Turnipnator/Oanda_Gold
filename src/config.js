@@ -93,6 +93,7 @@ class Config {
   // Trailing Stop
   static ENABLE_TRAILING_STOP = process.env.ENABLE_TRAILING_STOP !== 'false';
   static TRAILING_STOP_DISTANCE_PIPS = parseFloat(process.env.TRAILING_STOP_DISTANCE_PIPS || '150'); // $1.50 trail distance
+  static TRAILING_ACTIVATION_PIPS = parseFloat(process.env.TRAILING_ACTIVATION_PIPS || '200'); // $2.00 profit before trailing activates
 
   // Position Sizing (Oanda uses units: 1 unit = $1 worth of gold)
   static MIN_POSITION_SIZE = parseInt(process.env.MIN_POSITION_SIZE || '100');
