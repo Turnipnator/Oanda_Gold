@@ -37,7 +37,15 @@ class GoldTelegramBot {
    */
   async start() {
     try {
-      this.bot = new TelegramBot(Config.TELEGRAM_BOT_TOKEN, { polling: true });
+      this.bot = new TelegramBot(Config.TELEGRAM_BOT_TOKEN, {
+        polling: {
+          interval: 2000,           // Poll every 2 seconds
+          params: { timeout: 30 }   // Long-poll timeout of 30 seconds (prevents infinite hangs)
+        },
+        request: {
+          timeout: 30000            // HTTP request timeout of 30 seconds
+        }
+      });
 
       // Register command handlers
       this.bot.onText(/\/start/, (msg) => this.handleStart(msg));

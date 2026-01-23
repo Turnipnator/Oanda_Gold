@@ -69,6 +69,9 @@ class GoldTradingBot {
     // Track last API error notification (to avoid spam)
     this.lastApiErrorNotification = null;
 
+    // Watchdog: track last successful activity to detect hangs
+    this.lastActivityTime = Date.now();
+
     logger.info(`🤖 ${Config.BOT_NAME} initialized`);
   }
 
@@ -132,19 +135,63 @@ class GoldTradingBot {
 
   /**
    * Sync persisted positions with actual Oanda trades
-   * Removes positions that no longer exist on Oanda
+   * Removes positions that no longer exist on Oanda and sends closure notifications
    */
   async syncPositionsWithOanda() {
     try {
       const openTrades = await this.client.getOpenTrades();
       const oandaTradeIds = new Set(openTrades.map(t => t.tradeId));
 
-      // Remove positions that no longer exist on Oanda
+      // Find positions that were closed while bot was down/restarting
+      const closedWhileDown = [];
       for (const tradeId of this.activePositions.keys()) {
         if (!oandaTradeIds.has(tradeId)) {
-          logger.info(`🗑️ Removing stale position ${tradeId} (no longer open on Oanda)`);
-          this.activePositions.delete(tradeId);
+          closedWhileDown.push(tradeId);
         }
+      }
+
+      // Process each closed position - fetch details and notify
+      for (const tradeId of closedWhileDown) {
+        const tracked = this.activePositions.get(tradeId);
+        logger.info(`🗑️ Position ${tradeId} was closed while bot was down`);
+
+        try {
+          const response = await this.client.makeRequest('GET', `/v3/accounts/${this.client.accountId}/trades/${tradeId}`);
+          if (response.trade && response.trade.state === 'CLOSED') {
+            const trade = response.trade;
+            const entryPrice = parseFloat(trade.price);
+            const exitPrice = parseFloat(trade.averageClosePrice || entryPrice);
+            const pnl = parseFloat(trade.realizedPL || 0);
+            const pnlPct = (pnl / (entryPrice * Math.abs(parseFloat(trade.initialUnits)))) * 100;
+            const reason = trade.stopLossOrderID ? 'STOP_LOSS' : (trade.takeProfitOrderID ? 'TAKE_PROFIT' : 'Unknown');
+
+            logger.info(`💰 Closed trade ${tradeId}: ${pnl >= 0 ? '+' : ''}£${pnl.toFixed(2)} (${reason})`);
+
+            // Send Telegram notification if available
+            if (this.telegramBot) {
+              try {
+                await this.telegramBot.notifyTradeClosed(
+                  tracked?.symbol || 'XAU_USD',
+                  entryPrice,
+                  exitPrice,
+                  pnl,
+                  pnlPct,
+                  reason,
+                  tracked?.strategyName || 'Unknown'
+                );
+              } catch (telegramError) {
+                logger.warn(`Failed to send closure notification for ${tradeId}: ${telegramError.message}`);
+              }
+            }
+
+            // Update risk manager
+            this.riskManager.recordTrade(pnl);
+          }
+        } catch (error) {
+          logger.warn(`Could not fetch close details for trade ${tradeId}: ${error.message}`);
+        }
+
+        this.activePositions.delete(tradeId);
       }
 
       // Save cleaned up positions
@@ -188,10 +235,7 @@ class GoldTradingBot {
       // Initialize risk manager with current balance
       await this.riskManager.syncBalance();
 
-      // Sync persisted positions with actual Oanda trades
-      await this.syncPositionsWithOanda();
-
-      // Start Telegram bot if enabled
+      // Start Telegram bot if enabled (must start BEFORE position sync so notifications work)
       if (Config.ENABLE_TELEGRAM) {
         try {
           logger.info('Starting Telegram bot...');
@@ -203,6 +247,10 @@ class GoldTradingBot {
           this.telegramBot = null; // Disable Telegram if it fails
         }
       }
+
+      // Sync persisted positions with actual Oanda trades
+      // Done after Telegram starts so closure notifications can be sent
+      await this.syncPositionsWithOanda();
 
       // Display strategy information
       logger.info('');
@@ -241,6 +289,7 @@ class GoldTradingBot {
             if (this.isRunning) {
               try {
                 await this.scanMarket();
+                this.lastActivityTime = Date.now();
               } catch (error) {
                 logger.error(`Market scan failed: ${error.message}`);
                 logger.error(`Stack: ${error.stack}`);
@@ -280,6 +329,7 @@ class GoldTradingBot {
       logger.info('Running initial market scan...');
       try {
         await this.scanMarket();
+        this.lastActivityTime = Date.now();
       } catch (error) {
         logger.error(`Initial market scan failed: ${error.message}`);
         logger.warn('Bot will continue and retry on next scheduled scan');
@@ -311,6 +361,7 @@ class GoldTradingBot {
             if (this.isRunning) {
               try {
                 await this.monitorPositions();
+                this.lastActivityTime = Date.now();
               } catch (error) {
                 logger.error(`Position monitoring failed: ${error.message}`);
                 logger.error(`Stack: ${error.stack}`);
@@ -344,6 +395,21 @@ class GoldTradingBot {
 
       scheduleNextMonitor();
       logger.info(`✅ Recursive setTimeout initialized for position monitoring`);
+
+      // Watchdog timer - detects if the event loop is frozen/hung
+      // Replaces the need for hourly cron restart
+      const WATCHDOG_CHECK_INTERVAL = 5 * 60 * 1000;  // Check every 5 minutes
+      const WATCHDOG_TIMEOUT = 20 * 60 * 1000;        // Alert if no activity for 20 minutes
+      setInterval(() => {
+        const timeSinceActivity = Date.now() - this.lastActivityTime;
+        if (timeSinceActivity > WATCHDOG_TIMEOUT) {
+          logger.error(`🐕 WATCHDOG: No activity for ${Math.round(timeSinceActivity / 60000)} minutes - bot appears frozen!`);
+          logger.error(`🐕 WATCHDOG: Last activity was at ${new Date(this.lastActivityTime).toISOString()}`);
+          logger.error(`🐕 WATCHDOG: Exiting process - Docker will restart`);
+          process.exit(1);
+        }
+      }, WATCHDOG_CHECK_INTERVAL);
+      logger.info(`🐕 Watchdog timer active (exits if no activity for ${WATCHDOG_TIMEOUT / 60000} minutes)`);
 
       logger.info('');
       logger.info('═'.repeat(70));
