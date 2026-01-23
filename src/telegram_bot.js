@@ -39,11 +39,11 @@ class GoldTelegramBot {
     try {
       this.bot = new TelegramBot(Config.TELEGRAM_BOT_TOKEN, {
         polling: {
-          interval: 2000,           // Poll every 2 seconds
-          params: { timeout: 30 }   // Long-poll timeout of 30 seconds (prevents infinite hangs)
+          interval: 2000,           // Poll every 2 seconds between requests
+          params: { timeout: 30 }   // Tell Telegram to hold connection for up to 30s waiting for updates
         },
         request: {
-          timeout: 30000            // HTTP request timeout of 30 seconds
+          timeout: 40000            // HTTP timeout MUST be longer than polling timeout (30s + 10s buffer)
         }
       });
 
