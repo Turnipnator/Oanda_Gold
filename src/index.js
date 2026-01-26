@@ -643,8 +643,11 @@ class GoldTradingBot {
 
       // Recalculate SL based on actual fill price (not theoretical entry price)
       // The calculated SL may be wrong if fill price differs from analysis price
+      // Breakout trades use wider SL to survive post-breakout volatility
       const isLong = signal === 'LONG';
-      const stopDistance = Config.pipsToPrice(Config.STOP_LOSS_PIPS);
+      const isBreakoutTrade = strategyName?.includes('Breakout');
+      const stopPips = isBreakoutTrade ? Config.BREAKOUT_STOP_LOSS_PIPS : Config.STOP_LOSS_PIPS;
+      const stopDistance = Config.pipsToPrice(stopPips);
       const correctStopLoss = isLong
         ? order.price - stopDistance
         : order.price + stopDistance;
@@ -859,8 +862,11 @@ class GoldTradingBot {
 
           // Activate trailing when:
           // - TP1 already hit (staged TP mode), OR
-          // - Price moved in our favor by activation threshold (default $2.00)
-          const activationDistance = Config.pipsToPrice(Config.TRAILING_ACTIVATION_PIPS);
+          // - Price moved in our favor by activation threshold
+          // Breakout trades use wider activation ($3.50) to let the move establish
+          const isBreakoutTrade = tracked.strategyName?.includes('Breakout');
+          const activationPips = isBreakoutTrade ? Config.BREAKOUT_TRAILING_ACTIVATION_PIPS : Config.TRAILING_ACTIVATION_PIPS;
+          const activationDistance = Config.pipsToPrice(activationPips);
           const shouldTrail = tracked.tp1Hit || profitMove >= activationDistance;
 
           if (shouldTrail) {

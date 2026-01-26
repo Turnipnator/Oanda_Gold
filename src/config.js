@@ -95,6 +95,11 @@ class Config {
   static TRAILING_STOP_DISTANCE_PIPS = parseFloat(process.env.TRAILING_STOP_DISTANCE_PIPS || '150'); // $1.50 trail distance
   static TRAILING_ACTIVATION_PIPS = parseFloat(process.env.TRAILING_ACTIVATION_PIPS || '200'); // $2.00 profit before trailing activates
 
+  // Breakout-specific settings (wider to survive post-breakout volatility)
+  // Breakouts at major levels (like $5000) have big whipsaws - need room to breathe
+  static BREAKOUT_STOP_LOSS_PIPS = parseFloat(process.env.BREAKOUT_STOP_LOSS_PIPS || '550'); // $5.50 SL for breakouts
+  static BREAKOUT_TRAILING_ACTIVATION_PIPS = parseFloat(process.env.BREAKOUT_TRAILING_ACTIVATION_PIPS || '350'); // $3.50 profit before trailing
+
   // Position Sizing (Oanda uses units: 1 unit = $1 worth of gold)
   static MIN_POSITION_SIZE = parseInt(process.env.MIN_POSITION_SIZE || '100');
   static MAX_POSITION_SIZE = parseInt(process.env.MAX_POSITION_SIZE || '50000');

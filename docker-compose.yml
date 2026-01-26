@@ -45,6 +45,10 @@ services:
       - MOVE_STOP_TO_BE=${MOVE_STOP_TO_BE:-true}
       - ENABLE_TRAILING_STOP=${ENABLE_TRAILING_STOP:-true}
 
+      # Breakout-specific settings (wider to survive post-breakout volatility)
+      - BREAKOUT_STOP_LOSS_PIPS=${BREAKOUT_STOP_LOSS_PIPS:-550}
+      - BREAKOUT_TRAILING_ACTIVATION_PIPS=${BREAKOUT_TRAILING_ACTIVATION_PIPS:-350}
+
       # Multi-Timeframe (MTF) Settings
       - ENABLE_MTF=${ENABLE_MTF:-true}
       - MTF_ENTRY_TIMEFRAME=${MTF_ENTRY_TIMEFRAME:-H1}

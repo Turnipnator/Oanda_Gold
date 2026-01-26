@@ -470,8 +470,9 @@ class BreakoutADXStrategy {
     const entryPrice = mtfEntryPrice || analysis.indicators.price;
     const isLong = signal === 'LONG';
 
-    // Stop Loss
-    const stopPips = Config.STOP_LOSS_PIPS;
+    // Stop Loss - use wider SL for breakout trades to survive post-breakout volatility
+    // For LONG: SL below entry, For SHORT: SL above entry (same distance, opposite direction)
+    const stopPips = Config.BREAKOUT_STOP_LOSS_PIPS;
     const stopDistance = Config.pipsToPrice(stopPips);
     const stopLoss = isLong ? entryPrice - stopDistance : entryPrice + stopDistance;
 
