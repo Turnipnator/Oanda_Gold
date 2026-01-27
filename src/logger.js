@@ -1,8 +1,12 @@
 /**
  * Winston Logger Configuration
  * Provides structured logging with file and console output
+ *
+ * Note: Uses custom stdout transport to prevent log loss in Docker
+ * when running without TTY for extended periods
  */
 import winston from 'winston';
+import Transport from 'winston-transport';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { existsSync, mkdirSync } from 'fs';
@@ -15,6 +19,30 @@ const __dirname = dirname(__filename);
 const logsDir = dirname(Config.LOG_FILE_PATH);
 if (!existsSync(logsDir)) {
   mkdirSync(logsDir, { recursive: true });
+}
+
+/**
+ * Custom transport that writes directly to stdout with explicit flushing
+ * This prevents log loss when running in Docker without TTY for extended periods
+ */
+class FlushingConsoleTransport extends Transport {
+  constructor(opts = {}) {
+    super(opts);
+    this.format = opts.format;
+  }
+
+  log(info, callback) {
+    setImmediate(() => this.emit('logged', info));
+
+    // Format the message
+    const formatted = this.format ? this.format.transform(info) : info;
+    const message = formatted[Symbol.for('message')] || formatted.message;
+
+    // Write directly to stdout and force immediate output
+    process.stdout.write(message + '\n');
+
+    callback();
+  }
 }
 
 // Custom format for console output
@@ -36,9 +64,9 @@ const fileFormat = winston.format.combine(
   winston.format.json()
 );
 
-// Create transports array
+// Create transports array using custom flushing transport
 const transports = [
-  new winston.transports.Console({
+  new FlushingConsoleTransport({
     format: consoleFormat,
     level: Config.LOG_LEVEL
   })

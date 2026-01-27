@@ -8,6 +8,10 @@ services:
     container_name: gold-trading-bot
     restart: unless-stopped
 
+    # TTY mode forces line buffering for stdout (prevents log loss after extended runtime)
+    tty: true
+    stdin_open: true
+
     environment:
       # Oanda API Configuration
       - OANDA_API_KEY=${OANDA_API_KEY}
