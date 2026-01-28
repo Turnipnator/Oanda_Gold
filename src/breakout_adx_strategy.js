@@ -351,10 +351,16 @@ class BreakoutADXStrategy {
 
       // FRESHNESS FILTER 1: RSI overbought check
       // Don't buy into an overbought market - the move may be exhausted
+      // EXCEPTION: If ADX > 35 (strong trend), trust the momentum and ignore overbought RSI
       const rsi = analysis.indicators.rsi;
-      if (signal && rsi !== null && rsi > Config.BREAKOUT_RSI_MAX_LONG) {
+      const ADX_OVERRIDE_THRESHOLD = 35;
+      const adxOverride = adx !== null && adx > ADX_OVERRIDE_THRESHOLD;
+      if (signal && rsi !== null && rsi > Config.BREAKOUT_RSI_MAX_LONG && !adxOverride) {
         filters.push(`RSI ${rsi.toFixed(1)} > ${Config.BREAKOUT_RSI_MAX_LONG} (overbought - move exhausted)`);
         signal = null;
+      }
+      if (signal && adxOverride && rsi !== null && rsi > Config.BREAKOUT_RSI_MAX_LONG) {
+        this.logger.info(`🔥 ADX override: RSI ${rsi.toFixed(1)} is overbought but ADX ${adx.toFixed(1)} > ${ADX_OVERRIDE_THRESHOLD} confirms strong trend - allowing entry`);
       }
 
       // FRESHNESS FILTER 2: Distance from breakout level
@@ -402,10 +408,16 @@ class BreakoutADXStrategy {
 
       // FRESHNESS FILTER 1: RSI oversold check
       // Don't sell into an oversold market - the move may be exhausted
+      // EXCEPTION: If ADX > 35 (strong trend), trust the momentum and ignore oversold RSI
       const rsi = analysis.indicators.rsi;
-      if (signal && rsi !== null && rsi < Config.BREAKOUT_RSI_MIN_SHORT) {
+      const ADX_OVERRIDE_THRESHOLD = 35;
+      const adxOverride = adx !== null && adx > ADX_OVERRIDE_THRESHOLD;
+      if (signal && rsi !== null && rsi < Config.BREAKOUT_RSI_MIN_SHORT && !adxOverride) {
         filters.push(`RSI ${rsi.toFixed(1)} < ${Config.BREAKOUT_RSI_MIN_SHORT} (oversold - move exhausted)`);
         signal = null;
+      }
+      if (signal && adxOverride && rsi !== null && rsi < Config.BREAKOUT_RSI_MIN_SHORT) {
+        this.logger.info(`🔥 ADX override: RSI ${rsi.toFixed(1)} is oversold but ADX ${adx.toFixed(1)} > ${ADX_OVERRIDE_THRESHOLD} confirms strong trend - allowing entry`);
       }
 
       // FRESHNESS FILTER 2: Distance from breakout level
