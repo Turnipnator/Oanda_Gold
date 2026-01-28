@@ -135,7 +135,7 @@ class BreakoutADXStrategy {
    * Returns: { high: number, low: number }
    */
   calculateDonchianChannel(candles) {
-    const lookback = Config.Config.BREAKOUT_LOOKBACK;
+    const lookback = Config.BREAKOUT_LOOKBACK;
     if (candles.length < lookback) return null;
 
     // Get the lookback period candles (excluding the current candle)
