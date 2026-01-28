@@ -115,6 +115,13 @@ class Config {
   static ENABLE_ORDER_RETRY = process.env.ENABLE_ORDER_RETRY !== 'false'; // true by default
   static ORDER_RETRY_WIDEN_SL_PIPS = parseFloat(process.env.ORDER_RETRY_WIDEN_SL_PIPS || '100'); // Widen SL by $1 on retry
 
+  // Breakout Freshness Filters - prevent entering exhausted moves
+  // These filters ensure we enter near the breakout, not after the move is over
+  static BREAKOUT_RSI_MAX_LONG = parseFloat(process.env.BREAKOUT_RSI_MAX_LONG || '75'); // Block LONG when RSI > 75 (overbought)
+  static BREAKOUT_RSI_MIN_SHORT = parseFloat(process.env.BREAKOUT_RSI_MIN_SHORT || '25'); // Block SHORT when RSI < 25 (oversold)
+  static BREAKOUT_MAX_DISTANCE_FROM_LEVEL = parseFloat(process.env.BREAKOUT_MAX_DISTANCE_FROM_LEVEL || '500'); // Max $5 from breakout level
+  static BREAKOUT_MIN_CANDLE_POSITION = parseFloat(process.env.BREAKOUT_MIN_CANDLE_POSITION || '0.4'); // Price must be in upper 60% for longs
+
   // Position Sizing (Oanda uses units: 1 unit = $1 worth of gold)
   static MIN_POSITION_SIZE = parseInt(process.env.MIN_POSITION_SIZE || '100');
   static MAX_POSITION_SIZE = parseInt(process.env.MAX_POSITION_SIZE || '50000');

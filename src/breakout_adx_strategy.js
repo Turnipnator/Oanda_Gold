@@ -349,6 +349,32 @@ class BreakoutADXStrategy {
         signal = null;
       }
 
+      // FRESHNESS FILTER 1: RSI overbought check
+      // Don't buy into an overbought market - the move may be exhausted
+      const rsi = analysis.indicators.rsi;
+      if (signal && rsi !== null && rsi > Config.BREAKOUT_RSI_MAX_LONG) {
+        filters.push(`RSI ${rsi.toFixed(1)} > ${Config.BREAKOUT_RSI_MAX_LONG} (overbought - move exhausted)`);
+        signal = null;
+      }
+
+      // FRESHNESS FILTER 2: Distance from breakout level
+      // Don't enter if price has already moved too far from the breakout level
+      const distanceFromBreakout = currentPrice - this.previousHigh;
+      const maxDistance = Config.pipsToPrice(Config.BREAKOUT_MAX_DISTANCE_FROM_LEVEL);
+      if (signal && distanceFromBreakout > maxDistance) {
+        filters.push(`Price $${distanceFromBreakout.toFixed(2)} above breakout level (max $${maxDistance.toFixed(2)})`);
+        signal = null;
+      }
+
+      // FRESHNESS FILTER 3: Candle position check
+      // For longs, price should be in upper portion of candle (not sold off)
+      const candleRange = lastCandle.high - lastCandle.low;
+      const pricePosition = candleRange > 0 ? (currentPrice - lastCandle.low) / candleRange : 0.5;
+      if (signal && pricePosition < Config.BREAKOUT_MIN_CANDLE_POSITION) {
+        filters.push(`Price in lower ${((1 - pricePosition) * 100).toFixed(0)}% of candle (move fading)`);
+        signal = null;
+      }
+
       // Adjust confidence based on conditions
       if (signal) {
         if (adx !== null && adx > 25) confidence += 10;
@@ -371,6 +397,32 @@ class BreakoutADXStrategy {
       // Apply bearish candle filter
       if (signal && !isBearishCandle) {
         filters.push(`Bullish candle (need bearish confirmation)`);
+        signal = null;
+      }
+
+      // FRESHNESS FILTER 1: RSI oversold check
+      // Don't sell into an oversold market - the move may be exhausted
+      const rsi = analysis.indicators.rsi;
+      if (signal && rsi !== null && rsi < Config.BREAKOUT_RSI_MIN_SHORT) {
+        filters.push(`RSI ${rsi.toFixed(1)} < ${Config.BREAKOUT_RSI_MIN_SHORT} (oversold - move exhausted)`);
+        signal = null;
+      }
+
+      // FRESHNESS FILTER 2: Distance from breakout level
+      // Don't enter if price has already moved too far from the breakout level
+      const distanceFromBreakout = this.previousLow - currentPrice;
+      const maxDistance = Config.pipsToPrice(Config.BREAKOUT_MAX_DISTANCE_FROM_LEVEL);
+      if (signal && distanceFromBreakout > maxDistance) {
+        filters.push(`Price $${distanceFromBreakout.toFixed(2)} below breakout level (max $${maxDistance.toFixed(2)})`);
+        signal = null;
+      }
+
+      // FRESHNESS FILTER 3: Candle position check
+      // For shorts, price should be in lower portion of candle (not bounced)
+      const candleRange = lastCandle.high - lastCandle.low;
+      const pricePosition = candleRange > 0 ? (currentPrice - lastCandle.low) / candleRange : 0.5;
+      if (signal && pricePosition > (1 - Config.BREAKOUT_MIN_CANDLE_POSITION)) {
+        filters.push(`Price in upper ${(pricePosition * 100).toFixed(0)}% of candle (move fading)`);
         signal = null;
       }
 
@@ -571,13 +623,19 @@ class BreakoutADXStrategy {
       Trend Continuation: Re-enter on pullback to EMA${Config.TREND_CONTINUATION_PULLBACK_EMA} when ADX > ${Config.TREND_CONTINUATION_ADX_MIN}`;
     }
 
+    const freshnessDesc = `
+      Freshness Filters:
+      - RSI: Block LONG if > ${Config.BREAKOUT_RSI_MAX_LONG}, SHORT if < ${Config.BREAKOUT_RSI_MIN_SHORT}
+      - Max distance from breakout: $${Config.pipsToPrice(Config.BREAKOUT_MAX_DISTANCE_FROM_LEVEL).toFixed(2)}
+      - Min candle position: ${(Config.BREAKOUT_MIN_CANDLE_POSITION * 100).toFixed(0)}%`;
+
     return `
       ${this.name}
 
       Primary Timeframe: ${Config.TIMEFRAME} (${Config.TIMEFRAME === 'H1' ? '24' : '6'} signals/day)
       Direction: Price breaks ${Config.BREAKOUT_LOOKBACK}-bar high/low (Donchian Channel)
       Filter: ADX > ${ADX_MIN} (trending market)
-      Confirmation: Bullish candle for longs, bearish for shorts${mtfDesc}${trendContDesc}
+      Confirmation: Bullish candle for longs, bearish for shorts${mtfDesc}${trendContDesc}${freshnessDesc}
       Stop Loss: ${Config.BREAKOUT_STOP_LOSS_PIPS} pips ($${(Config.BREAKOUT_STOP_LOSS_PIPS * 0.01).toFixed(2)})
       ${tpDesc}
       Order Retry: ${Config.ENABLE_ORDER_RETRY ? 'Enabled' : 'Disabled'}
