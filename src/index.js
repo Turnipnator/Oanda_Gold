@@ -626,12 +626,70 @@ class GoldTradingBot {
         takeProfit = levels.takeProfit1;
       }
 
-      const order = await this.client.placeMarketOrder(
+      let order = await this.client.placeMarketOrder(
         Config.TRADING_SYMBOL,
         units,
         levels.stopLoss,
         takeProfit
       );
+
+      // Order retry logic - handle common failures
+      if (!order.success && Config.ENABLE_ORDER_RETRY) {
+        const retriableErrors = ['STOP_LOSS_ON_FILL_LOSS', 'STOP_LOSS_ON_FILL_GTD_TIMESTAMP_IN_PAST'];
+
+        if (retriableErrors.some(err => order.reason?.includes(err) || order.rejectReason?.includes(err))) {
+          logger.warn(`⚠️ Order failed with ${order.reason} - retrying with wider SL...`);
+
+          // Widen the stop loss
+          const widenAmount = Config.pipsToPrice(Config.ORDER_RETRY_WIDEN_SL_PIPS);
+          const isLong = signal === 'LONG';
+          const newStopLoss = isLong
+            ? levels.stopLoss - widenAmount
+            : levels.stopLoss + widenAmount;
+
+          logger.info(`🔧 Widening SL from $${levels.stopLoss.toFixed(2)} to $${newStopLoss.toFixed(2)} (+$${widenAmount.toFixed(2)})`);
+
+          // Retry with wider stop loss
+          order = await this.client.placeMarketOrder(
+            Config.TRADING_SYMBOL,
+            units,
+            newStopLoss,
+            takeProfit
+          );
+
+          if (order.success) {
+            logger.info(`✅ Retry successful with wider SL!`);
+            levels.stopLoss = newStopLoss; // Update levels for tracking
+          } else {
+            // Second retry: try without SL, add it after fill
+            logger.warn(`⚠️ Retry with wider SL failed - trying without SL...`);
+
+            order = await this.client.placeMarketOrder(
+              Config.TRADING_SYMBOL,
+              units,
+              null,  // No stop loss
+              null   // No take profit
+            );
+
+            if (order.success) {
+              logger.info(`✅ Order filled without SL - adding SL now...`);
+              try {
+                // Calculate SL based on actual fill price
+                const fillBasedSL = isLong
+                  ? order.price - Config.pipsToPrice(Config.BREAKOUT_STOP_LOSS_PIPS + Config.ORDER_RETRY_WIDEN_SL_PIPS)
+                  : order.price + Config.pipsToPrice(Config.BREAKOUT_STOP_LOSS_PIPS + Config.ORDER_RETRY_WIDEN_SL_PIPS);
+
+                await this.client.modifyTrade(order.tradeId, fillBasedSL, null);
+                levels.stopLoss = fillBasedSL;
+                logger.info(`✅ SL added at $${fillBasedSL.toFixed(2)}`);
+              } catch (slError) {
+                logger.error(`❌ Failed to add SL after fill: ${slError.message}`);
+                // Continue anyway - position is open, monitor will handle it
+              }
+            }
+          }
+        }
+      }
 
       if (!order.success) {
         logger.error(`Order failed: ${order.reason}`);

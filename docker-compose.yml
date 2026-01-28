@@ -52,13 +52,26 @@ services:
       # Breakout-specific settings (wider to survive post-breakout volatility)
       - BREAKOUT_STOP_LOSS_PIPS=${BREAKOUT_STOP_LOSS_PIPS:-550}
       - BREAKOUT_TRAILING_ACTIVATION_PIPS=${BREAKOUT_TRAILING_ACTIVATION_PIPS:-350}
+      - BREAKOUT_LOOKBACK=${BREAKOUT_LOOKBACK:-10}
 
-      # Multi-Timeframe (MTF) Settings
+      # Primary Timeframe (H1 = 24 signals/day vs H4 = 6)
+      - TIMEFRAME=${TIMEFRAME:-H1}
+
+      # Multi-Timeframe (MTF) Settings - M15 for entry timing with H1 primary
       - ENABLE_MTF=${ENABLE_MTF:-true}
-      - MTF_ENTRY_TIMEFRAME=${MTF_ENTRY_TIMEFRAME:-H1}
-      - MTF_PULLBACK_PIPS=${MTF_PULLBACK_PIPS:-100}
+      - MTF_ENTRY_TIMEFRAME=${MTF_ENTRY_TIMEFRAME:-M15}
+      - MTF_PULLBACK_PIPS=${MTF_PULLBACK_PIPS:-50}
       - MTF_MAX_WAIT_CANDLES=${MTF_MAX_WAIT_CANDLES:-8}
       - MTF_EMA_PERIOD=${MTF_EMA_PERIOD:-20}
+
+      # Trend Continuation Mode - re-enter on pullbacks during strong trends
+      - ENABLE_TREND_CONTINUATION=${ENABLE_TREND_CONTINUATION:-true}
+      - TREND_CONTINUATION_ADX_MIN=${TREND_CONTINUATION_ADX_MIN:-25}
+      - TREND_CONTINUATION_PULLBACK_EMA=${TREND_CONTINUATION_PULLBACK_EMA:-20}
+
+      # Order Retry Settings - retry failed orders with adjusted parameters
+      - ENABLE_ORDER_RETRY=${ENABLE_ORDER_RETRY:-true}
+      - ORDER_RETRY_WIDEN_SL_PIPS=${ORDER_RETRY_WIDEN_SL_PIPS:-100}
 
       # Position Sizing
       - MIN_POSITION_SIZE=${MIN_POSITION_SIZE:-100}

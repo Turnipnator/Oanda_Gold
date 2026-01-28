@@ -30,8 +30,7 @@ const __dirname = path.dirname(__filename);
 const DATA_DIR = process.env.NODE_ENV === 'production' ? '/app/data' : path.join(__dirname, '..', 'data');
 const STATE_FILE = path.join(DATA_DIR, 'breakout_adx_state.json');
 
-// Strategy parameters
-const BREAKOUT_LOOKBACK = 20;  // Number of candles for Donchian channel
+// Strategy parameters (now configurable via Config)
 const ADX_MIN = 20;            // Minimum ADX for trending market
 
 class BreakoutADXStrategy {
@@ -40,7 +39,7 @@ class BreakoutADXStrategy {
     this.ta = technicalAnalysis;
     this.name = Config.ENABLE_MTF
       ? `Breakout + ADX MTF (H4→${Config.MTF_ENTRY_TIMEFRAME})`
-      : `Breakout + ADX (${BREAKOUT_LOOKBACK}-bar)`;
+      : `Breakout + ADX (${Config.BREAKOUT_LOOKBACK}-bar)`;
     this.lastCandleTime = null;
     this.lastSignal = null;
     this.previousHigh = null;
@@ -132,14 +131,15 @@ class BreakoutADXStrategy {
   }
 
   /**
-   * Calculate Donchian Channel (20-bar high/low)
+   * Calculate Donchian Channel (configurable lookback, default 10-bar)
    * Returns: { high: number, low: number }
    */
   calculateDonchianChannel(candles) {
-    if (candles.length < BREAKOUT_LOOKBACK) return null;
+    const lookback = Config.Config.BREAKOUT_LOOKBACK;
+    if (candles.length < lookback) return null;
 
     // Get the lookback period candles (excluding the current candle)
-    const lookbackCandles = candles.slice(-(BREAKOUT_LOOKBACK + 1), -1);
+    const lookbackCandles = candles.slice(-(lookback + 1), -1);
 
     const channelHigh = Math.max(...lookbackCandles.map(c => c.high));
     const channelLow = Math.min(...lookbackCandles.map(c => c.low));
@@ -265,7 +265,7 @@ class BreakoutADXStrategy {
     }
 
     // Need enough candles for Donchian channel
-    if (!candles || candles.length < BREAKOUT_LOOKBACK + 1) {
+    if (!candles || candles.length < Config.BREAKOUT_LOOKBACK + 1) {
       return {
         signal: null,
         reason: 'Insufficient candle data for Donchian channel calculation',
@@ -335,7 +335,7 @@ class BreakoutADXStrategy {
 
     if (bullishBreakout) {
       signal = 'LONG';
-      reason = `Bullish breakout: Price $${currentPrice.toFixed(2)} broke above ${BREAKOUT_LOOKBACK}-bar high $${this.previousHigh.toFixed(2)}`;
+      reason = `Bullish breakout: Price $${currentPrice.toFixed(2)} broke above ${Config.BREAKOUT_LOOKBACK}-bar high $${this.previousHigh.toFixed(2)}`;
 
       // Apply ADX filter
       if (adx !== null && adx < ADX_MIN) {
@@ -360,7 +360,7 @@ class BreakoutADXStrategy {
     }
     else if (bearishBreakout) {
       signal = 'SHORT';
-      reason = `Bearish breakout: Price $${currentPrice.toFixed(2)} broke below ${BREAKOUT_LOOKBACK}-bar low $${this.previousLow.toFixed(2)}`;
+      reason = `Bearish breakout: Price $${currentPrice.toFixed(2)} broke below ${Config.BREAKOUT_LOOKBACK}-bar low $${this.previousLow.toFixed(2)}`;
 
       // Apply ADX filter
       if (adx !== null && adx < ADX_MIN) {
@@ -384,7 +384,39 @@ class BreakoutADXStrategy {
       }
     }
     else {
-      reason = `No breakout. Channel: $${channel.low.toFixed(2)} - $${channel.high.toFixed(2)}, Price: $${currentPrice.toFixed(2)}`;
+      // No breakout - check for trend continuation opportunity
+      if (Config.ENABLE_TREND_CONTINUATION && this.lastSignal && adx !== null && adx >= Config.TREND_CONTINUATION_ADX_MIN) {
+        // Calculate EMA for pullback detection
+        const closes = candles.map(c => c.close);
+        const ema = this.calculateEMA(closes, Config.TREND_CONTINUATION_PULLBACK_EMA);
+
+        if (ema) {
+          const isLong = this.lastSignal === 'LONG';
+          const emaTolerance = 2.0; // Allow $2 tolerance around EMA
+
+          // Check if price pulled back to EMA
+          const nearEMA = Math.abs(currentPrice - ema) <= emaTolerance;
+          // For longs: price should be bouncing off EMA from above or at EMA with bullish candle
+          // For shorts: price should be rejecting from EMA from below or at EMA with bearish candle
+          const validPullback = isLong
+            ? (nearEMA && isBullishCandle && currentPrice >= ema - emaTolerance)
+            : (nearEMA && isBearishCandle && currentPrice <= ema + emaTolerance);
+
+          if (validPullback) {
+            signal = this.lastSignal;
+            reason = `Trend continuation: ${signal} pullback to EMA${Config.TREND_CONTINUATION_PULLBACK_EMA} ($${ema.toFixed(2)}), ADX ${adx.toFixed(1)} confirms strong trend`;
+            confidence = 70; // Slightly lower confidence than fresh breakout
+
+            this.logger.info(`🔄 Trend continuation signal: ${signal} @ $${currentPrice.toFixed(2)} (pullback to EMA${Config.TREND_CONTINUATION_PULLBACK_EMA})`);
+          } else {
+            reason = `No breakout. Channel: $${channel.low.toFixed(2)} - $${channel.high.toFixed(2)}, Price: $${currentPrice.toFixed(2)}`;
+          }
+        } else {
+          reason = `No breakout. Channel: $${channel.low.toFixed(2)} - $${channel.high.toFixed(2)}, Price: $${currentPrice.toFixed(2)}`;
+        }
+      } else {
+        reason = `No breakout. Channel: $${channel.low.toFixed(2)} - $${channel.high.toFixed(2)}, Price: $${currentPrice.toFixed(2)}`;
+      }
     }
 
     // If breakout detected but filtered out
@@ -533,16 +565,24 @@ class BreakoutADXStrategy {
       Max Wait: ${Config.MTF_MAX_WAIT_CANDLES} ${Config.MTF_ENTRY_TIMEFRAME} candles`;
     }
 
+    let trendContDesc = '';
+    if (Config.ENABLE_TREND_CONTINUATION) {
+      trendContDesc = `
+      Trend Continuation: Re-enter on pullback to EMA${Config.TREND_CONTINUATION_PULLBACK_EMA} when ADX > ${Config.TREND_CONTINUATION_ADX_MIN}`;
+    }
+
     return `
       ${this.name}
 
-      Direction (H4): Price breaks ${BREAKOUT_LOOKBACK}-bar high/low (Donchian Channel)
+      Primary Timeframe: ${Config.TIMEFRAME} (${Config.TIMEFRAME === 'H1' ? '24' : '6'} signals/day)
+      Direction: Price breaks ${Config.BREAKOUT_LOOKBACK}-bar high/low (Donchian Channel)
       Filter: ADX > ${ADX_MIN} (trending market)
-      Confirmation: Bullish candle for longs, bearish for shorts${mtfDesc}
-      Stop Loss: ${Config.STOP_LOSS_PIPS} pips ($${(Config.STOP_LOSS_PIPS * 0.01).toFixed(2)})
+      Confirmation: Bullish candle for longs, bearish for shorts${mtfDesc}${trendContDesc}
+      Stop Loss: ${Config.BREAKOUT_STOP_LOSS_PIPS} pips ($${(Config.BREAKOUT_STOP_LOSS_PIPS * 0.01).toFixed(2)})
       ${tpDesc}
+      Order Retry: ${Config.ENABLE_ORDER_RETRY ? 'Enabled' : 'Disabled'}
 
-      ${Config.ENABLE_MTF ? 'Multi-timeframe breakout strategy with H1 pullback entry' : 'Trend-following breakout strategy with ADX confirmation'}
+      ${Config.ENABLE_MTF ? `Multi-timeframe breakout with ${Config.MTF_ENTRY_TIMEFRAME} entry timing` : 'Trend-following breakout with ADX confirmation'}
     `.trim();
   }
 }

@@ -48,7 +48,8 @@ class Config {
   // Triple Confirmation Strategy Parameters
   static EMA_FAST = parseInt(process.env.EMA_FAST || '20');
   static EMA_SLOW = parseInt(process.env.EMA_SLOW || '50');
-  static TIMEFRAME = process.env.TIMEFRAME || 'H4'; // 4-hour candles
+  // Primary timeframe: H1 gives 24 signals/day vs 6 for H4 (changed Jan 28 2026)
+  static TIMEFRAME = process.env.TIMEFRAME || 'H1'; // 1-hour candles (was H4)
 
   // RSI Configuration
   static RSI_PERIOD = parseInt(process.env.RSI_PERIOD || '14');
@@ -65,11 +66,12 @@ class Config {
   static STRATEGY_TYPE = process.env.STRATEGY_TYPE || 'breakout_adx'; // 'breakout_adx' (recommended) or 'triple_confirmation'
 
   // Multi-Timeframe (MTF) Settings
-  // Uses H4 for direction, H1 for entry timing (better entries, higher win rate)
+  // With H1 primary: uses M15 for entry timing (better entries, higher win rate)
+  // With H4 primary: uses H1 for entry timing
   static ENABLE_MTF = process.env.ENABLE_MTF !== 'false'; // true by default
-  static MTF_ENTRY_TIMEFRAME = process.env.MTF_ENTRY_TIMEFRAME || 'H1'; // Entry timing timeframe
-  static MTF_PULLBACK_PIPS = parseFloat(process.env.MTF_PULLBACK_PIPS || '100'); // Wait for $1.00 pullback
-  static MTF_MAX_WAIT_CANDLES = parseInt(process.env.MTF_MAX_WAIT_CANDLES || '8'); // Max H1 candles to wait (8 hours)
+  static MTF_ENTRY_TIMEFRAME = process.env.MTF_ENTRY_TIMEFRAME || 'M15'; // Entry timing timeframe (was H1 for H4 primary)
+  static MTF_PULLBACK_PIPS = parseFloat(process.env.MTF_PULLBACK_PIPS || '50'); // Wait for $0.50 pullback (smaller for faster timeframe)
+  static MTF_MAX_WAIT_CANDLES = parseInt(process.env.MTF_MAX_WAIT_CANDLES || '8'); // Max M15 candles to wait (2 hours)
   static MTF_EMA_PERIOD = parseInt(process.env.MTF_EMA_PERIOD || '20'); // EMA period on entry timeframe
 
   // Bot Identification
@@ -99,6 +101,19 @@ class Config {
   // Breakouts at major levels (like $5000) have big whipsaws - need room to breathe
   static BREAKOUT_STOP_LOSS_PIPS = parseFloat(process.env.BREAKOUT_STOP_LOSS_PIPS || '550'); // $5.50 SL for breakouts
   static BREAKOUT_TRAILING_ACTIVATION_PIPS = parseFloat(process.env.BREAKOUT_TRAILING_ACTIVATION_PIPS || '350'); // $3.50 profit before trailing
+
+  // Breakout Strategy Settings
+  static BREAKOUT_LOOKBACK = parseInt(process.env.BREAKOUT_LOOKBACK || '10'); // Donchian channel period (was 20, reduced for more signals)
+
+  // Trend Continuation Mode - re-enter on pullbacks during strong trends
+  // After a breakout, if ADX stays strong and price pulls back to EMA, enter again
+  static ENABLE_TREND_CONTINUATION = process.env.ENABLE_TREND_CONTINUATION !== 'false'; // true by default
+  static TREND_CONTINUATION_ADX_MIN = parseFloat(process.env.TREND_CONTINUATION_ADX_MIN || '25'); // Strong trend threshold
+  static TREND_CONTINUATION_PULLBACK_EMA = parseInt(process.env.TREND_CONTINUATION_PULLBACK_EMA || '20'); // Pullback to EMA20
+
+  // Order Retry Settings - retry failed orders with adjusted parameters
+  static ENABLE_ORDER_RETRY = process.env.ENABLE_ORDER_RETRY !== 'false'; // true by default
+  static ORDER_RETRY_WIDEN_SL_PIPS = parseFloat(process.env.ORDER_RETRY_WIDEN_SL_PIPS || '100'); // Widen SL by $1 on retry
 
   // Position Sizing (Oanda uses units: 1 unit = $1 worth of gold)
   static MIN_POSITION_SIZE = parseInt(process.env.MIN_POSITION_SIZE || '100');
