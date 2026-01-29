@@ -103,7 +103,7 @@ class Config {
   static BREAKOUT_TRAILING_ACTIVATION_PIPS = parseFloat(process.env.BREAKOUT_TRAILING_ACTIVATION_PIPS || '350'); // $3.50 profit before trailing
 
   // Breakout Strategy Settings
-  static BREAKOUT_LOOKBACK = parseInt(process.env.BREAKOUT_LOOKBACK || '10'); // Donchian channel period (was 20, reduced for more signals)
+  static BREAKOUT_LOOKBACK = parseInt(process.env.BREAKOUT_LOOKBACK || '5'); // Donchian channel period (tighter = more breakouts in trends)
 
   // Trend Continuation Mode - re-enter on pullbacks during strong trends
   // After a breakout, if ADX stays strong and price pulls back to EMA, enter again
