@@ -344,9 +344,15 @@ class BreakoutADXStrategy {
       }
 
       // Apply bullish candle filter
-      if (signal && !isBullishCandle) {
+      // EXCEPTION: If ADX > 40 (very strong trend), bypass candle confirmation
+      const CANDLE_ADX_OVERRIDE = 40;
+      const candleAdxOverride = adx !== null && adx > CANDLE_ADX_OVERRIDE;
+      if (signal && !isBullishCandle && !candleAdxOverride) {
         filters.push(`Bearish candle (need bullish confirmation)`);
         signal = null;
+      }
+      if (signal && !isBullishCandle && candleAdxOverride) {
+        this.logger.info(`🔥 ADX override: Bearish candle but ADX ${adx.toFixed(1)} > ${CANDLE_ADX_OVERRIDE} confirms strong trend - allowing LONG entry`);
       }
 
       // FRESHNESS FILTER 1: RSI overbought check
@@ -401,9 +407,15 @@ class BreakoutADXStrategy {
       }
 
       // Apply bearish candle filter
-      if (signal && !isBearishCandle) {
+      // EXCEPTION: If ADX > 40 (very strong trend), bypass candle confirmation
+      const CANDLE_ADX_OVERRIDE = 40;
+      const candleAdxOverride = adx !== null && adx > CANDLE_ADX_OVERRIDE;
+      if (signal && !isBearishCandle && !candleAdxOverride) {
         filters.push(`Bullish candle (need bearish confirmation)`);
         signal = null;
+      }
+      if (signal && !isBearishCandle && candleAdxOverride) {
+        this.logger.info(`🔥 ADX override: Bullish candle but ADX ${adx.toFixed(1)} > ${CANDLE_ADX_OVERRIDE} confirms strong trend - allowing SHORT entry`);
       }
 
       // FRESHNESS FILTER 1: RSI oversold check
