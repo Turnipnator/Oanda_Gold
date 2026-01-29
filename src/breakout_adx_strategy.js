@@ -1,22 +1,22 @@
 /**
  * Breakout + ADX Strategy with Multi-Timeframe (MTF) Support
  *
- * Entry Rules (H4):
- * - LONG: Price breaks ABOVE 20-bar high
+ * Entry Rules (Primary Timeframe - configurable via TIMEFRAME env var):
+ * - LONG: Price breaks ABOVE N-bar high (Donchian Channel)
  *         + ADX > 20 (trending market confirmation)
  *         + Bullish candle (close > open)
- * - SHORT: Price breaks BELOW 20-bar low
+ * - SHORT: Price breaks BELOW N-bar low (Donchian Channel)
  *          + ADX > 20 (trending market confirmation)
  *          + Bearish candle (close < open)
  *
- * MTF Entry Refinement (H1):
- * - After H4 breakout, wait for H1 pullback to EMA20 or pullback target
- * - Enter on H1 confirmation candle (bullish for longs, bearish for shorts)
+ * MTF Entry Refinement (Entry Timeframe - configurable via MTF_ENTRY_TIMEFRAME):
+ * - After primary breakout, wait for entry TF pullback to EMA20 or pullback target
+ * - Enter on entry TF confirmation candle (bullish for longs, bearish for shorts)
  * - Better entry = tighter stop loss = higher win rate
  *
- * Backtest Results (4 months Sep 2025 - Jan 2026):
- * - H4 only: 53 trades, 17% win rate, £34k profit
- * - H4+H1 MTF: 52 trades, 50% win rate, £62k profit
+ * Common configurations:
+ * - H4 primary + H1 entry: Swing trading (6 signals/day max)
+ * - H1 primary + M15 entry: Active trading (24 signals/day max)
  */
 import Config from './config.js';
 import fs from 'fs';
@@ -38,7 +38,7 @@ class BreakoutADXStrategy {
     this.logger = logger;
     this.ta = technicalAnalysis;
     this.name = Config.ENABLE_MTF
-      ? `Breakout + ADX MTF (H4→${Config.MTF_ENTRY_TIMEFRAME})`
+      ? `Breakout + ADX MTF (${Config.TIMEFRAME}→${Config.MTF_ENTRY_TIMEFRAME})`
       : `Breakout + ADX (${Config.BREAKOUT_LOOKBACK}-bar)`;
     this.lastCandleTime = null;
     this.lastSignal = null;
@@ -46,7 +46,7 @@ class BreakoutADXStrategy {
     this.previousLow = null;
 
     // MTF state
-    this.pendingSignal = null;  // Stores H4 breakout waiting for H1 entry
+    this.pendingSignal = null;  // Stores primary TF breakout waiting for entry TF confirmation
     this.pendingSignalTime = null;
     this.pendingBreakoutPrice = null;
     this.h1CandlesChecked = 0;
