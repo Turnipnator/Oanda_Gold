@@ -396,6 +396,30 @@ class GoldTradingBot {
       scheduleNextMonitor();
       logger.info(`✅ Recursive setTimeout initialized for position monitoring`);
 
+      // Real-time price monitoring for breakout detection (every 30 seconds)
+      // Catches breakouts as they happen, not just at candle close
+      if (Config.STRATEGY_TYPE === 'breakout_adx') {
+        logger.info(`⏰ Scheduling real-time breakout checks every ${Config.REALTIME_CHECK_INTERVAL_SECONDS} seconds`);
+
+        const scheduleRealtimeCheck = () => {
+          setTimeout(async () => {
+            try {
+              if (this.isRunning) {
+                await this.checkRealtimeBreakout();
+                this.lastActivityTime = Date.now();
+              }
+            } catch (error) {
+              logger.error(`Realtime breakout check failed: ${error.message}`);
+            } finally {
+              setImmediate(() => scheduleRealtimeCheck());
+            }
+          }, Config.REALTIME_CHECK_INTERVAL_SECONDS * 1000);
+        };
+
+        scheduleRealtimeCheck();
+        logger.info(`✅ Real-time breakout monitoring initialized (${Config.BREAKOUT_CONFIRMATION_SECONDS}s confirmation delay)`);
+      }
+
       // Watchdog timer - detects if the event loop is frozen/hung
       // Replaces the need for hourly cron restart
       const WATCHDOG_CHECK_INTERVAL = 5 * 60 * 1000;  // Check every 5 minutes
@@ -1032,6 +1056,109 @@ class GoldTradingBot {
 
     } catch (error) {
       logger.error(`Error monitoring positions: ${error.message}`);
+    }
+  }
+
+  /**
+   * Check for real-time breakouts (runs every 30 seconds)
+   * Detects breakouts as they happen, not just at candle close
+   */
+  async checkRealtimeBreakout() {
+    try {
+      // Only check if using breakout strategy
+      if (Config.STRATEGY_TYPE !== 'breakout_adx') {
+        return;
+      }
+
+      // Check if we already have a position
+      const existingTrades = await this.client.getOpenTrades();
+      const hasPosition = existingTrades.some(t => t.instrument === Config.TRADING_SYMBOL);
+      if (hasPosition) {
+        return; // Don't check for new breakouts when we have a position
+      }
+
+      // Check if there's a pending MTF signal (don't interfere)
+      if (this.breakoutStrategy.pendingSignal) {
+        return;
+      }
+
+      // Fetch current price
+      const priceData = await this.client.getPrice(Config.TRADING_SYMBOL);
+      const currentPrice = priceData.mid;
+
+      // Fetch recent candles for indicator calculation (need ~50 for ADX/RSI)
+      const candles = await this.client.getCandles(Config.TRADING_SYMBOL, Config.TIMEFRAME, 60);
+      const completeCandles = candles.filter(c => c.complete);
+
+      if (completeCandles.length < 50) {
+        return;
+      }
+
+      // Calculate indicators
+      const analysis = this.ta.analyze(completeCandles);
+      const adx = analysis.indicators.adx;
+      const rsi = analysis.indicators.rsi;
+
+      // Check for real-time breakout
+      const result = this.breakoutStrategy.checkRealtimeBreakout(currentPrice, adx, rsi);
+
+      if (result.pending) {
+        // Log pending status periodically (not every check to reduce noise)
+        if (!this.lastRealtimeLog || Date.now() - this.lastRealtimeLog >= 30000) {
+          logger.info(`⏳ Realtime: ${result.reason}`);
+          this.lastRealtimeLog = Date.now();
+        }
+        return;
+      }
+
+      if (!result.signal) {
+        // No breakout - nothing to do
+        return;
+      }
+
+      // We have a confirmed real-time breakout signal!
+      logger.info('');
+      logger.info('🎯 REAL-TIME BREAKOUT SIGNAL!');
+      logger.info(`Signal: ${result.signal}`);
+      logger.info(`Entry: $${result.entryPrice.toFixed(2)}`);
+      logger.info(`Confidence: ${result.confidence}%`);
+      logger.info(`Reason: ${result.reason}`);
+      logger.info('');
+
+      // Calculate entry levels
+      const levels = this.breakoutStrategy.calculateEntryLevels(analysis, result.signal, result.entryPrice);
+
+      // Calculate position size
+      const positionSize = this.riskManager.calculatePositionSize(levels.entryPrice, levels.stopLoss);
+
+      if (positionSize === 0) {
+        logger.error('Position size calculation failed');
+        return;
+      }
+
+      // Adjust units for direction
+      const units = result.signal === 'LONG' ? positionSize : -positionSize;
+
+      // Check risk management
+      const canTrade = await this.riskManager.canOpenTrade(levels.entryPrice, levels.stopLoss, Math.abs(units));
+
+      if (!canTrade.allowed) {
+        logger.risk(`Trade blocked: ${canTrade.reason}`);
+        return;
+      }
+
+      // Execute trade
+      await this.executeTrade(
+        result.signal,
+        units,
+        levels,
+        result.reason,
+        'Breakout + ADX (Realtime)',
+        result.confidence
+      );
+
+    } catch (error) {
+      logger.error(`Error in realtime breakout check: ${error.message}`);
     }
   }
 

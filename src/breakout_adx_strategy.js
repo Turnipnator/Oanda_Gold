@@ -51,6 +51,12 @@ class BreakoutADXStrategy {
     this.pendingBreakoutPrice = null;
     this.h1CandlesChecked = 0;
 
+    // Real-time breakout tracking (detects breakouts between candle closes)
+    this.realtimeBreakoutDirection = null;  // 'LONG' or 'SHORT'
+    this.realtimeBreakoutTime = null;       // When breakout first detected (timestamp)
+    this.realtimeBreakoutPrice = null;      // Price at first detection
+    this.realtimeBreakoutLevel = null;      // Channel level that was broken
+
     // Load persisted state on startup
     this.loadState();
   }
@@ -73,6 +79,11 @@ class BreakoutADXStrategy {
         pendingSignalTime: this.pendingSignalTime,
         pendingBreakoutPrice: this.pendingBreakoutPrice,
         h1CandlesChecked: this.h1CandlesChecked,
+        // Real-time breakout tracking
+        realtimeBreakoutDirection: this.realtimeBreakoutDirection,
+        realtimeBreakoutTime: this.realtimeBreakoutTime,
+        realtimeBreakoutPrice: this.realtimeBreakoutPrice,
+        realtimeBreakoutLevel: this.realtimeBreakoutLevel,
         savedAt: new Date().toISOString()
       };
 
@@ -104,6 +115,11 @@ class BreakoutADXStrategy {
       this.pendingSignalTime = state.pendingSignalTime || null;
       this.pendingBreakoutPrice = state.pendingBreakoutPrice || null;
       this.h1CandlesChecked = state.h1CandlesChecked || 0;
+      // Real-time breakout tracking
+      this.realtimeBreakoutDirection = state.realtimeBreakoutDirection || null;
+      this.realtimeBreakoutTime = state.realtimeBreakoutTime || null;
+      this.realtimeBreakoutPrice = state.realtimeBreakoutPrice || null;
+      this.realtimeBreakoutLevel = state.realtimeBreakoutLevel || null;
 
       this.logger.info(`📂 Loaded Breakout+ADX state: High=$${this.previousHigh?.toFixed(2) || 'null'}, Low=$${this.previousLow?.toFixed(2) || 'null'}`);
       if (this.pendingSignal) {
@@ -568,6 +584,165 @@ class BreakoutADXStrategy {
   shouldExit(position, currentPrice, candles) {
     // This strategy uses fixed SL/TP, no discretionary exits
     return false;
+  }
+
+  /**
+   * Clear real-time breakout tracking
+   */
+  clearRealtimeBreakout() {
+    this.realtimeBreakoutDirection = null;
+    this.realtimeBreakoutTime = null;
+    this.realtimeBreakoutPrice = null;
+    this.realtimeBreakoutLevel = null;
+    this.saveState();
+  }
+
+  /**
+   * Check for real-time breakout (called every 30 seconds between candle closes)
+   * Detects breakouts as they happen, with 60-second confirmation to filter wicks
+   *
+   * @param {number} currentPrice - Current market price
+   * @param {number} adx - Current ADX value
+   * @param {number} rsi - Current RSI value
+   * @returns {Object} { signal: 'LONG'|'SHORT'|null, reason, confidence, pending?, isRealtime? }
+   */
+  checkRealtimeBreakout(currentPrice, adx, rsi) {
+    // Need channel values from previous candle close
+    if (this.previousHigh === null || this.previousLow === null) {
+      return {
+        signal: null,
+        reason: 'No channel data yet - waiting for candle close',
+        confidence: 0
+      };
+    }
+
+    const now = Date.now();
+    const confirmationMs = Config.BREAKOUT_CONFIRMATION_SECONDS * 1000;
+
+    // Check if price is breaking the channel
+    const bullishBreakout = currentPrice > this.previousHigh;
+    const bearishBreakout = currentPrice < this.previousLow;
+
+    // No breakout - clear any pending tracking
+    if (!bullishBreakout && !bearishBreakout) {
+      if (this.realtimeBreakoutDirection) {
+        this.logger.info(`🔄 Realtime: Price back inside channel ($${this.previousLow.toFixed(2)} - $${this.previousHigh.toFixed(2)}) - wick filtered`);
+        this.clearRealtimeBreakout();
+      }
+      return {
+        signal: null,
+        reason: `No breakout. Price $${currentPrice.toFixed(2)} inside channel $${this.previousLow.toFixed(2)} - $${this.previousHigh.toFixed(2)}`,
+        confidence: 0
+      };
+    }
+
+    // Determine breakout direction
+    const direction = bullishBreakout ? 'LONG' : 'SHORT';
+    const breakoutLevel = bullishBreakout ? this.previousHigh : this.previousLow;
+    const distanceFromLevel = bullishBreakout
+      ? currentPrice - this.previousHigh
+      : this.previousLow - currentPrice;
+
+    // First detection of this breakout?
+    if (!this.realtimeBreakoutDirection || this.realtimeBreakoutDirection !== direction) {
+      // New breakout or direction changed - start tracking
+      this.realtimeBreakoutDirection = direction;
+      this.realtimeBreakoutTime = now;
+      this.realtimeBreakoutPrice = currentPrice;
+      this.realtimeBreakoutLevel = breakoutLevel;
+      this.saveState();
+
+      this.logger.info(`⚡ Realtime: ${direction} breakout detected! Price $${currentPrice.toFixed(2)} broke ${direction === 'LONG' ? 'above' : 'below'} $${breakoutLevel.toFixed(2)}`);
+      this.logger.info(`   Waiting ${Config.BREAKOUT_CONFIRMATION_SECONDS}s for confirmation...`);
+
+      return {
+        signal: null,
+        pending: true,
+        direction,
+        reason: `${direction} breakout detected, waiting ${Config.BREAKOUT_CONFIRMATION_SECONDS}s for confirmation`,
+        confidence: 0
+      };
+    }
+
+    // Already tracking this breakout - check if confirmation period elapsed
+    const elapsedMs = now - this.realtimeBreakoutTime;
+    const elapsedSec = Math.round(elapsedMs / 1000);
+
+    if (elapsedMs < confirmationMs) {
+      // Still waiting for confirmation
+      const remainingSec = Math.round((confirmationMs - elapsedMs) / 1000);
+      return {
+        signal: null,
+        pending: true,
+        direction,
+        reason: `${direction} breakout pending confirmation (${remainingSec}s remaining)`,
+        confidence: 0
+      };
+    }
+
+    // Confirmation period elapsed - price held below/above channel
+    this.logger.info(`✅ Realtime: ${direction} breakout CONFIRMED after ${elapsedSec}s!`);
+    this.logger.info(`   Initial break: $${this.realtimeBreakoutPrice.toFixed(2)}, Current: $${currentPrice.toFixed(2)}`);
+
+    // Apply filters
+    const filters = [];
+
+    // ADX filter
+    if (adx !== null && adx < ADX_MIN) {
+      filters.push(`ADX ${adx.toFixed(1)} < ${ADX_MIN} (ranging market)`);
+    }
+
+    // RSI filter (with ADX override)
+    const ADX_OVERRIDE_THRESHOLD = 35;
+    const adxOverride = adx !== null && adx > ADX_OVERRIDE_THRESHOLD;
+
+    if (direction === 'LONG' && rsi !== null && rsi > Config.BREAKOUT_RSI_MAX_LONG && !adxOverride) {
+      filters.push(`RSI ${rsi.toFixed(1)} > ${Config.BREAKOUT_RSI_MAX_LONG} (overbought)`);
+    }
+    if (direction === 'SHORT' && rsi !== null && rsi < Config.BREAKOUT_RSI_MIN_SHORT && !adxOverride) {
+      filters.push(`RSI ${rsi.toFixed(1)} < ${Config.BREAKOUT_RSI_MIN_SHORT} (oversold)`);
+    }
+
+    // Distance filter
+    const maxDistance = Config.pipsToPrice(Config.BREAKOUT_MAX_DISTANCE_FROM_LEVEL);
+    if (distanceFromLevel > maxDistance) {
+      filters.push(`Price $${distanceFromLevel.toFixed(2)} from breakout level (max $${maxDistance.toFixed(2)})`);
+    }
+
+    // If any filters failed, reject
+    if (filters.length > 0) {
+      this.logger.info(`❌ Realtime: Breakout filtered - ${filters.join(', ')}`);
+      this.clearRealtimeBreakout();
+      return {
+        signal: null,
+        reason: `${direction} breakout confirmed but filtered: ${filters.join(', ')}`,
+        confidence: 0
+      };
+    }
+
+    // All filters passed - generate signal!
+    let confidence = 60; // Base confidence for realtime breakout
+    if (adx !== null && adx > 25) confidence += 10;
+    if (adx !== null && adx > 30) confidence += 10;
+    if (distanceFromLevel > 2) confidence += 5;
+
+    const reason = `Realtime ${direction} breakout: Price $${currentPrice.toFixed(2)} broke ${direction === 'LONG' ? 'above' : 'below'} $${breakoutLevel.toFixed(2)}, confirmed after ${elapsedSec}s, ADX ${adx?.toFixed(1) || 'N/A'}`;
+
+    this.logger.info(`🎯 Realtime: SIGNAL GENERATED - ${direction} @ $${currentPrice.toFixed(2)}`);
+
+    // Clear tracking (signal consumed)
+    this.clearRealtimeBreakout();
+
+    // Update lastSignal for trend continuation
+    this.lastSignal = direction;
+
+    return {
+      signal: direction,
+      reason,
+      confidence,
+      entryPrice: currentPrice,
+      isRealtime: true
+    };
   }
 
   /**

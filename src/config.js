@@ -122,6 +122,11 @@ class Config {
   static BREAKOUT_MAX_DISTANCE_FROM_LEVEL = parseFloat(process.env.BREAKOUT_MAX_DISTANCE_FROM_LEVEL || '2000'); // Max $20 from breakout level
   static BREAKOUT_MIN_CANDLE_POSITION = parseFloat(process.env.BREAKOUT_MIN_CANDLE_POSITION || '0.4'); // Price must be in upper 60% for longs
 
+  // Real-time breakout detection - checks price between candle closes
+  // Detects breakouts as they happen, not just at candle close
+  static REALTIME_CHECK_INTERVAL_SECONDS = parseInt(process.env.REALTIME_CHECK_INTERVAL_SECONDS || '30'); // Check every 30 seconds
+  static BREAKOUT_CONFIRMATION_SECONDS = parseInt(process.env.BREAKOUT_CONFIRMATION_SECONDS || '60'); // Wait 60s to filter wicks
+
   // Position Sizing (Oanda uses units: 1 unit = $1 worth of gold)
   static MIN_POSITION_SIZE = parseInt(process.env.MIN_POSITION_SIZE || '100');
   static MAX_POSITION_SIZE = parseInt(process.env.MAX_POSITION_SIZE || '50000');
