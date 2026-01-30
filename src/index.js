@@ -1077,23 +1077,27 @@ class GoldTradingBot {
       const existingTrades = await this.client.getOpenTrades();
       const hasPosition = existingTrades.some(t => t.instrument === Config.TRADING_SYMBOL);
       if (hasPosition) {
-        return; // Don't check for new breakouts when we have a position
+        logger.debug('🔍 Realtime check skipped - already have position');
+        return;
       }
 
       // Check if there's a pending MTF signal (don't interfere)
       if (this.breakoutStrategy.pendingSignal) {
+        logger.debug('🔍 Realtime check skipped - pending MTF signal');
         return;
       }
 
       // Fetch current price
       const priceData = await this.client.getPrice(Config.TRADING_SYMBOL);
       const currentPrice = priceData.mid;
+      logger.debug(`🔍 Realtime: Price=$${currentPrice.toFixed(2)}`);
 
       // Fetch recent candles for indicator calculation (need ~50 for ADX/RSI)
       const candles = await this.client.getCandles(Config.TRADING_SYMBOL, Config.TIMEFRAME, 60);
       const completeCandles = candles.filter(c => c.complete);
 
       if (completeCandles.length < 50) {
+        logger.debug('🔍 Realtime check skipped - insufficient candles');
         return;
       }
 
@@ -1101,9 +1105,11 @@ class GoldTradingBot {
       const analysis = this.ta.analyze(completeCandles);
       const adx = analysis.indicators.adx;
       const rsi = analysis.indicators.rsi;
+      logger.debug(`🔍 Realtime: ADX=${adx?.toFixed(1)}, RSI=${rsi?.toFixed(1)}, Channel=$${this.breakoutStrategy.previousLow?.toFixed(2)}-$${this.breakoutStrategy.previousHigh?.toFixed(2)}`);
 
       // Check for real-time breakout
       const result = this.breakoutStrategy.checkRealtimeBreakout(currentPrice, adx, rsi);
+      logger.debug(`🔍 Realtime result: signal=${result.signal}, pending=${result.pending}, reason=${result.reason?.substring(0, 50)}...`);
 
       if (result.pending) {
         // Log pending status periodically (not every check to reduce noise)
