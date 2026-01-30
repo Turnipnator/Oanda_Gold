@@ -127,6 +127,11 @@ class Config {
   static REALTIME_CHECK_INTERVAL_SECONDS = parseInt(process.env.REALTIME_CHECK_INTERVAL_SECONDS || '30'); // Check every 30 seconds
   static BREAKOUT_CONFIRMATION_SECONDS = parseInt(process.env.BREAKOUT_CONFIRMATION_SECONDS || '60'); // Wait 60s to filter wicks
 
+  // Trade cooldown - prevents rapid-fire re-entries after stop-loss
+  // After any trade closes (win or lose), wait this long before entering again
+  // Prevents repeated losses on the same failed breakout level
+  static TRADE_COOLDOWN_HOURS = parseFloat(process.env.TRADE_COOLDOWN_HOURS || '4'); // 4 hours = 1 H4 candle
+
   // Position Sizing (Oanda uses units: 1 unit = $1 worth of gold)
   static MIN_POSITION_SIZE = parseInt(process.env.MIN_POSITION_SIZE || '100');
   static MAX_POSITION_SIZE = parseInt(process.env.MAX_POSITION_SIZE || '50000');

@@ -72,7 +72,33 @@ class GoldTradingBot {
     // Watchdog: track last successful activity to detect hangs
     this.lastActivityTime = Date.now();
 
+    // Trade cooldown: track when last trade closed to prevent rapid re-entries
+    this.lastTradeCloseTime = null;
+
     logger.info(`🤖 ${Config.BOT_NAME} initialized`);
+  }
+
+  /**
+   * Check if trade cooldown is active (prevents rapid re-entries after losses)
+   * @returns {Object} { active: boolean, remainingMinutes: number }
+   */
+  checkTradeCooldown() {
+    if (!this.lastTradeCloseTime || Config.TRADE_COOLDOWN_HOURS <= 0) {
+      return { active: false, remainingMinutes: 0 };
+    }
+
+    const cooldownMs = Config.TRADE_COOLDOWN_HOURS * 60 * 60 * 1000;
+    const elapsed = Date.now() - this.lastTradeCloseTime;
+    const remaining = cooldownMs - elapsed;
+
+    if (remaining <= 0) {
+      return { active: false, remainingMinutes: 0 };
+    }
+
+    return {
+      active: true,
+      remainingMinutes: Math.ceil(remaining / 60000)
+    };
   }
 
   /**
@@ -166,6 +192,10 @@ class GoldTradingBot {
             const reason = trade.stopLossOrderID ? 'STOP_LOSS' : (trade.takeProfitOrderID ? 'TAKE_PROFIT' : 'Unknown');
 
             logger.info(`💰 Closed trade ${tradeId}: ${pnl >= 0 ? '+' : ''}£${pnl.toFixed(2)} (${reason})`);
+
+            // Set cooldown timer to prevent rapid re-entries
+            this.lastTradeCloseTime = Date.now();
+            logger.info(`⏳ Trade cooldown started - next trade in ${Config.TRADE_COOLDOWN_HOURS} hours`);
 
             // Send Telegram notification if available
             if (this.telegramBot) {
@@ -545,6 +575,15 @@ class GoldTradingBot {
 
       if (hasPosition) {
         logger.info('❌ Already have open position in XAU_USD - skipping');
+        return;
+      }
+
+      // Check trade cooldown (prevents rapid re-entries after losses)
+      const cooldown = this.checkTradeCooldown();
+      if (cooldown.active) {
+        logger.info(`⏳ Trade cooldown active - ${cooldown.remainingMinutes} minutes remaining`);
+        logger.info(`   Last trade closed at ${new Date(this.lastTradeCloseTime).toISOString()}`);
+        logger.info(`   Next trade allowed after ${new Date(this.lastTradeCloseTime + Config.TRADE_COOLDOWN_HOURS * 3600000).toISOString()}`);
         return;
       }
 
@@ -1026,6 +1065,10 @@ class GoldTradingBot {
             logger.info(`💰 P&L: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%)`);
             logger.info(`Reason: ${reason}`);
 
+            // Set cooldown timer to prevent rapid re-entries
+            this.lastTradeCloseTime = Date.now();
+            logger.info(`⏳ Trade cooldown started - next trade in ${Config.TRADE_COOLDOWN_HOURS} hours`);
+
             // Notify via Telegram
             if (this.telegramBot) {
               try {
@@ -1078,6 +1121,13 @@ class GoldTradingBot {
       const hasPosition = existingTrades.some(t => t.instrument === Config.TRADING_SYMBOL);
       if (hasPosition) {
         logger.debug('🔍 Realtime check skipped - already have position');
+        return;
+      }
+
+      // Check trade cooldown (prevents rapid re-entries after losses)
+      const cooldown = this.checkTradeCooldown();
+      if (cooldown.active) {
+        logger.debug(`🔍 Realtime check skipped - cooldown active (${cooldown.remainingMinutes}m remaining)`);
         return;
       }
 
