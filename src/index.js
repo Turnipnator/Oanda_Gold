@@ -22,6 +22,7 @@ const __dirname = path.dirname(__filename);
 // Position data file path - use /app/data in Docker, ./data locally
 const DATA_DIR = process.env.NODE_ENV === 'production' ? '/app/data' : path.join(__dirname, '..', 'data');
 const POSITIONS_FILE = path.join(DATA_DIR, 'active_positions.json');
+const COOLDOWN_FILE = path.join(DATA_DIR, 'trade_cooldown.json');
 
 class GoldTradingBot {
   constructor() {
@@ -75,6 +76,9 @@ class GoldTradingBot {
     // Trade cooldown: track when last trade closed to prevent rapid re-entries
     this.lastTradeCloseTime = null;
 
+    // Load persisted cooldown on startup
+    this.loadCooldown();
+
     logger.info(`🤖 ${Config.BOT_NAME} initialized`);
   }
 
@@ -99,6 +103,55 @@ class GoldTradingBot {
       active: true,
       remainingMinutes: Math.ceil(remaining / 60000)
     };
+  }
+
+  /**
+   * Save cooldown timer to file for persistence across restarts
+   */
+  saveCooldown() {
+    try {
+      if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+      }
+
+      const data = {
+        lastTradeCloseTime: this.lastTradeCloseTime,
+        savedAt: Date.now()
+      };
+
+      fs.writeFileSync(COOLDOWN_FILE, JSON.stringify(data, null, 2));
+      logger.debug(`💾 Saved cooldown timer to file`);
+    } catch (error) {
+      logger.error(`Failed to save cooldown: ${error.message}`);
+    }
+  }
+
+  /**
+   * Load cooldown timer from file
+   */
+  loadCooldown() {
+    try {
+      if (!fs.existsSync(COOLDOWN_FILE)) {
+        logger.info('📂 No persisted cooldown found');
+        return;
+      }
+
+      const rawData = fs.readFileSync(COOLDOWN_FILE, 'utf8');
+      const data = JSON.parse(rawData);
+
+      if (data.lastTradeCloseTime) {
+        this.lastTradeCloseTime = data.lastTradeCloseTime;
+        const cooldown = this.checkTradeCooldown();
+        if (cooldown.active) {
+          logger.info(`📂 Loaded cooldown: ${cooldown.remainingMinutes} minutes remaining`);
+        } else {
+          logger.info(`📂 Loaded cooldown expired - ready to trade`);
+          this.lastTradeCloseTime = null;
+        }
+      }
+    } catch (error) {
+      logger.error(`Failed to load cooldown: ${error.message}`);
+    }
   }
 
   /**
@@ -195,6 +248,7 @@ class GoldTradingBot {
 
             // Set cooldown timer to prevent rapid re-entries
             this.lastTradeCloseTime = Date.now();
+            this.saveCooldown();
             logger.info(`⏳ Trade cooldown started - next trade in ${Config.TRADE_COOLDOWN_HOURS} hours`);
 
             // Send Telegram notification if available
@@ -1067,6 +1121,7 @@ class GoldTradingBot {
 
             // Set cooldown timer to prevent rapid re-entries
             this.lastTradeCloseTime = Date.now();
+            this.saveCooldown();
             logger.info(`⏳ Trade cooldown started - next trade in ${Config.TRADE_COOLDOWN_HOURS} hours`);
 
             // Notify via Telegram
