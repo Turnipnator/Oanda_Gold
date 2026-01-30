@@ -1065,8 +1065,11 @@ class GoldTradingBot {
    */
   async checkRealtimeBreakout() {
     try {
+      logger.debug('🔍 Realtime check starting...');
+
       // Only check if using breakout strategy
       if (Config.STRATEGY_TYPE !== 'breakout_adx') {
+        logger.debug('🔍 Realtime check skipped - not breakout_adx strategy');
         return;
       }
 
