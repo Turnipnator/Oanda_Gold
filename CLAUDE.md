@@ -690,6 +690,50 @@ const LIVE_ACCOUNT = {
 
 ---
 
+## 🟢 Current Active Strategy: Breakout + ADX MTF
+
+The bot currently runs a **Breakout + ADX Multi-Timeframe** strategy, which outperformed Triple Confirmation in backtests.
+
+### Strategy Architecture
+```
+Breakout + ADX MTF Strategy (H1 → M15)
+├── TRADING HOURS: 08:00-22:00 UK time (skips Asian session)
+├── Direction (H1): Price breaks 10-bar high/low (Donchian Channel)
+├── ADX Filter: > 20 (confirms trending market)
+├── Candle Filter: Bullish candle for longs, bearish for shorts
+├── MTF Entry (M15): Wait for pullback to EMA20 or $0.50 pullback
+├── Max Wait: 8 M15 candles (2 hours) before canceling signal
+├── REAL-TIME MONITORING: Price checked every 30s, 60s confirmation
+├── MOMENTUM FILTER: Confirmation price must be >= breakout price (prevents fakeouts)
+├── Stop Loss: 550 pips ($5.50) - recalculated on actual fill price
+├── Take Profit: NONE - trailing stop only (let winners run!)
+├── Trailing Activation: 350 pips ($3.50) min profit before trailing
+├── Trailing Stop: 150 pips ($1.50) - follows price, locks in profit
+└── Trade Cooldown: 4 hours after any trade closes
+```
+
+### Key Filters Explained
+
+**Trading Hours Filter**: Only trades 08:00-22:00 UK time. Asian session (00:00-08:00) has low liquidity and wild wicks that cause instant stop-outs.
+
+**Momentum Filter**: After detecting a breakout, waits 60s for confirmation. If the confirmation price is worse than the initial breakout price (e.g., LONG breakout at $4787 but price falls to $4785 during confirmation), it's classified as a fakeout and skipped.
+
+**Trade Cooldown**: After any trade closes (win or lose), no new entries for 4 hours. Prevents rapid re-entry losses when price bounces around a breakout level.
+
+### Recent Improvements (2026)
+
+| Date | Fix | Problem Solved |
+|------|-----|----------------|
+| Feb 2 | Momentum filter | Fakeouts where price reverses during 60s confirmation |
+| Feb 2 | Trading hours filter | Asian session stop-outs in seconds |
+| Jan 30 | 10-bar lookback | Too many false breakouts with 5-bar channel |
+| Jan 30 | Real-time detection | Missing breakouts that happen within candles |
+| Jan 30 | Trade cooldown | 4 losses in 15 minutes from same level |
+| Jan 22 | Trailing activation | Trailing started at $0 profit, now requires $3.50 |
+| Jan 21 | MTF entries | Better entry prices by waiting for pullbacks |
+
+---
+
 ## ⚡ Final Words of Wisdom
 
 **This isn't get-rich-quick. This is get-rich-slow-and-actually-keep-it.**
@@ -717,8 +761,8 @@ That's how you stay in business for 20+ years.
 
 ---
 
-**Version**: 1.0  
-**Last Updated**: November 2024  
+**Version**: 2.0
+**Last Updated**: February 2026
 **Maintained By**: Claude + Paul (The Gold Trading Team)
 
 ---
