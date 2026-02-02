@@ -97,8 +97,11 @@ services:
 
       # Trading Schedule
       - SCAN_INTERVAL_MINUTES=${SCAN_INTERVAL_MINUTES:-15}
-      - TRADING_START_HOUR=${TRADING_START_HOUR:-0}
-      - TRADING_END_HOUR=${TRADING_END_HOUR:-23}
+
+      # Trading Hours Filter (UK time) - avoids Asian session low liquidity
+      # Default 08:00-22:00 UK skips wild wicks in early hours
+      - TRADING_START_HOUR=${TRADING_START_HOUR:-8}
+      - TRADING_END_HOUR=${TRADING_END_HOUR:-22}
 
       # Timezone
       - TZ=${TZ:-UTC}

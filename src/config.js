@@ -160,9 +160,11 @@ class Config {
     }
   }
 
-  // Trading Schedule
-  static TRADING_START_HOUR = parseInt(process.env.TRADING_START_HOUR || '0');
-  static TRADING_END_HOUR = parseInt(process.env.TRADING_END_HOUR || '23');
+  // Trading Schedule (UK time)
+  // Default 08:00-22:00 avoids Asian session when liquidity is low and wicks are wild
+  // Both trades at 01:18 and 05:44 on Feb 2 2026 stopped out in seconds during Asian hours
+  static TRADING_START_HOUR = parseInt(process.env.TRADING_START_HOUR || '8');
+  static TRADING_END_HOUR = parseInt(process.env.TRADING_END_HOUR || '22');
   static AVOID_MAJOR_NEWS = process.env.AVOID_MAJOR_NEWS === 'true';
 
   // Analysis Settings

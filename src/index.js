@@ -106,6 +106,39 @@ class GoldTradingBot {
   }
 
   /**
+   * Check if we're within allowed trading hours
+   * Avoids Asian session (00:00-08:00 UK) when liquidity is low and wicks are wild
+   * @returns {{ allowed: boolean, currentHour: number, reason?: string }}
+   */
+  checkTradingHours() {
+    // Get current hour in UK timezone
+    const now = new Date();
+    const ukTime = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/London' }));
+    const currentHour = ukTime.getHours();
+
+    const startHour = Config.TRADING_START_HOUR;
+    const endHour = Config.TRADING_END_HOUR;
+
+    // Handle normal range (e.g., 08:00-22:00)
+    if (startHour < endHour) {
+      const allowed = currentHour >= startHour && currentHour < endHour;
+      return {
+        allowed,
+        currentHour,
+        reason: allowed ? null : `Outside trading hours (${startHour}:00-${endHour}:00 UK, currently ${currentHour}:00)`
+      };
+    }
+
+    // Handle overnight range (e.g., 22:00-08:00) - would mean startHour > endHour
+    const allowed = currentHour >= startHour || currentHour < endHour;
+    return {
+      allowed,
+      currentHour,
+      reason: allowed ? null : `Outside trading hours (${startHour}:00-${endHour}:00 UK, currently ${currentHour}:00)`
+    };
+  }
+
+  /**
    * Save cooldown timer to file for persistence across restarts
    */
   saveCooldown() {
@@ -638,6 +671,14 @@ class GoldTradingBot {
         logger.info(`⏳ Trade cooldown active - ${cooldown.remainingMinutes} minutes remaining`);
         logger.info(`   Last trade closed at ${new Date(this.lastTradeCloseTime).toISOString()}`);
         logger.info(`   Next trade allowed after ${new Date(this.lastTradeCloseTime + Config.TRADE_COOLDOWN_HOURS * 3600000).toISOString()}`);
+        return;
+      }
+
+      // Check trading hours (avoid Asian session with low liquidity and wild wicks)
+      const tradingHours = this.checkTradingHours();
+      if (!tradingHours.allowed) {
+        logger.info(`🌙 ${tradingHours.reason}`);
+        logger.info(`   Skipping trade entry - will resume at ${Config.TRADING_START_HOUR}:00 UK time`);
         return;
       }
 
@@ -1183,6 +1224,13 @@ class GoldTradingBot {
       const cooldown = this.checkTradeCooldown();
       if (cooldown.active) {
         logger.debug(`🔍 Realtime check skipped - cooldown active (${cooldown.remainingMinutes}m remaining)`);
+        return;
+      }
+
+      // Check trading hours (avoid Asian session with low liquidity and wild wicks)
+      const tradingHours = this.checkTradingHours();
+      if (!tradingHours.allowed) {
+        logger.debug(`🔍 Realtime check skipped - ${tradingHours.reason}`);
         return;
       }
 
