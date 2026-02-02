@@ -687,6 +687,21 @@ class BreakoutADXStrategy {
     // Apply filters
     const filters = [];
 
+    // MOMENTUM FILTER: Check if price is still moving in breakout direction
+    // If price is already reversing during confirmation period, it's a fakeout
+    // For LONG: confirmation price should be >= initial break price (not falling back)
+    // For SHORT: confirmation price should be <= initial break price (not bouncing)
+    const momentumValid = direction === 'LONG'
+      ? currentPrice >= this.realtimeBreakoutPrice
+      : currentPrice <= this.realtimeBreakoutPrice;
+
+    if (!momentumValid) {
+      const diff = direction === 'LONG'
+        ? this.realtimeBreakoutPrice - currentPrice
+        : currentPrice - this.realtimeBreakoutPrice;
+      filters.push(`Momentum fading: Price reversed $${diff.toFixed(2)} during confirmation (fakeout)`);
+    }
+
     // ADX filter
     if (adx !== null && adx < ADX_MIN) {
       filters.push(`ADX ${adx.toFixed(1)} < ${ADX_MIN} (ranging market)`);
