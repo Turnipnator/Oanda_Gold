@@ -57,6 +57,12 @@ class BreakoutADXStrategy {
     this.realtimeBreakoutPrice = null;      // Price at first detection
     this.realtimeBreakoutLevel = null;      // Channel level that was broken
 
+    // Real-time MTF pending signal (waits for pullback after confirmed breakout)
+    this.realtimeMTFPending = null;         // 'LONG' or 'SHORT'
+    this.realtimeMTFBreakoutPrice = null;   // Price at breakout confirmation
+    this.realtimeMTFTime = null;            // When breakout was confirmed
+    this.realtimeMTFBestPullback = null;    // Best pullback price seen (lowest for LONG, highest for SHORT)
+
     // Load persisted state on startup
     this.loadState();
   }
@@ -84,6 +90,11 @@ class BreakoutADXStrategy {
         realtimeBreakoutTime: this.realtimeBreakoutTime,
         realtimeBreakoutPrice: this.realtimeBreakoutPrice,
         realtimeBreakoutLevel: this.realtimeBreakoutLevel,
+        // Real-time MTF pending signal
+        realtimeMTFPending: this.realtimeMTFPending,
+        realtimeMTFBreakoutPrice: this.realtimeMTFBreakoutPrice,
+        realtimeMTFTime: this.realtimeMTFTime,
+        realtimeMTFBestPullback: this.realtimeMTFBestPullback,
         savedAt: new Date().toISOString()
       };
 
@@ -121,9 +132,18 @@ class BreakoutADXStrategy {
       this.realtimeBreakoutPrice = state.realtimeBreakoutPrice || null;
       this.realtimeBreakoutLevel = state.realtimeBreakoutLevel || null;
 
+      // Real-time MTF pending signal
+      this.realtimeMTFPending = state.realtimeMTFPending || null;
+      this.realtimeMTFBreakoutPrice = state.realtimeMTFBreakoutPrice || null;
+      this.realtimeMTFTime = state.realtimeMTFTime || null;
+      this.realtimeMTFBestPullback = state.realtimeMTFBestPullback || null;
+
       this.logger.info(`📂 Loaded Breakout+ADX state: High=$${this.previousHigh?.toFixed(2) || 'null'}, Low=$${this.previousLow?.toFixed(2) || 'null'}`);
       if (this.pendingSignal) {
-        this.logger.info(`📂 Pending ${this.pendingSignal} signal from H4 breakout at $${this.pendingBreakoutPrice?.toFixed(2)}`);
+        this.logger.info(`📂 Pending ${this.pendingSignal} signal from candle-based breakout at $${this.pendingBreakoutPrice?.toFixed(2)}`);
+      }
+      if (this.realtimeMTFPending) {
+        this.logger.info(`📂 Pending ${this.realtimeMTFPending} signal from realtime MTF at $${this.realtimeMTFBreakoutPrice?.toFixed(2)}, waiting for pullback`);
       }
     } catch (error) {
       this.logger.error(`Failed to load Breakout+ADX strategy state: ${error.message}`);
@@ -598,6 +618,115 @@ class BreakoutADXStrategy {
   }
 
   /**
+   * Clear real-time MTF pending signal
+   */
+  clearRealtimeMTF() {
+    this.realtimeMTFPending = null;
+    this.realtimeMTFBreakoutPrice = null;
+    this.realtimeMTFTime = null;
+    this.realtimeMTFBestPullback = null;
+    this.saveState();
+  }
+
+  /**
+   * Check if there's a pending realtime MTF signal waiting for pullback entry
+   * @returns {boolean}
+   */
+  hasRealtimeMTFPending() {
+    return this.realtimeMTFPending !== null;
+  }
+
+  /**
+   * Check for realtime MTF entry (pullback after confirmed breakout)
+   * Called every 30 seconds when there's a pending MTF signal
+   *
+   * @param {number} currentPrice - Current market price
+   * @returns {Object} { signal: 'LONG'|'SHORT'|null, reason, confidence, entryPrice }
+   */
+  checkRealtimeMTFEntry(currentPrice) {
+    if (!this.realtimeMTFPending) {
+      return { signal: null, reason: 'No pending MTF signal', confidence: 0 };
+    }
+
+    const isLong = this.realtimeMTFPending === 'LONG';
+    const breakoutPrice = this.realtimeMTFBreakoutPrice;
+    const pullbackTarget = Config.pipsToPrice(Config.MTF_PULLBACK_PIPS);
+    const maxWaitMs = Config.MTF_MAX_WAIT_CANDLES * 15 * 60 * 1000; // Convert candles to ms (assuming M15)
+
+    // Check timeout (2 hours default = 8 M15 candles)
+    const elapsed = Date.now() - this.realtimeMTFTime;
+    if (elapsed > maxWaitMs) {
+      this.logger.info(`⏰ Realtime MTF timeout: No pullback entry after ${Math.round(elapsed / 60000)} minutes, canceling ${this.realtimeMTFPending}`);
+      this.clearRealtimeMTF();
+      return { signal: null, reason: 'MTF timeout - no pullback entry found', confidence: 0 };
+    }
+
+    // Track best pullback (lowest for LONG, highest for SHORT)
+    if (this.realtimeMTFBestPullback === null) {
+      this.realtimeMTFBestPullback = currentPrice;
+    } else if (isLong && currentPrice < this.realtimeMTFBestPullback) {
+      this.realtimeMTFBestPullback = currentPrice;
+    } else if (!isLong && currentPrice > this.realtimeMTFBestPullback) {
+      this.realtimeMTFBestPullback = currentPrice;
+    }
+
+    // Calculate pullback from breakout price
+    const pullbackAmount = isLong
+      ? breakoutPrice - this.realtimeMTFBestPullback
+      : this.realtimeMTFBestPullback - breakoutPrice;
+
+    // Check if we've had enough pullback
+    if (pullbackAmount < pullbackTarget) {
+      const remaining = (pullbackTarget - pullbackAmount).toFixed(2);
+      return {
+        signal: null,
+        pending: true,
+        reason: `Waiting for pullback: best=$${this.realtimeMTFBestPullback.toFixed(2)}, need $${remaining} more pullback`,
+        confidence: 0
+      };
+    }
+
+    // We've had enough pullback - now check if price is moving back in our direction
+    // For LONG: current price should be above best pullback (bouncing up)
+    // For SHORT: current price should be below best pullback (falling again)
+    const movingFavorably = isLong
+      ? currentPrice > this.realtimeMTFBestPullback + 0.50  // $0.50 bounce for LONG
+      : currentPrice < this.realtimeMTFBestPullback - 0.50; // $0.50 drop for SHORT
+
+    if (!movingFavorably) {
+      return {
+        signal: null,
+        pending: true,
+        reason: `Pullback detected ($${pullbackAmount.toFixed(2)}), waiting for price to move favorably`,
+        confidence: 0
+      };
+    }
+
+    // Entry conditions met!
+    const improvement = isLong
+      ? breakoutPrice - currentPrice
+      : currentPrice - breakoutPrice;
+
+    this.logger.info(`✅ Realtime MTF Entry Found! ${this.realtimeMTFPending} @ $${currentPrice.toFixed(2)}`);
+    this.logger.info(`   Breakout was at $${breakoutPrice.toFixed(2)}, pullback to $${this.realtimeMTFBestPullback.toFixed(2)}`);
+    this.logger.info(`   Entry improvement: $${improvement.toFixed(2)} better than immediate entry`);
+
+    const signal = this.realtimeMTFPending;
+    const reason = `Realtime MTF ${signal}: Breakout at $${breakoutPrice.toFixed(2)}, pullback to $${this.realtimeMTFBestPullback.toFixed(2)}, entry at $${currentPrice.toFixed(2)} (improved by $${improvement.toFixed(2)})`;
+
+    // Clear pending signal
+    this.clearRealtimeMTF();
+
+    return {
+      signal,
+      reason,
+      confidence: 70, // Slightly higher confidence due to better entry
+      entryPrice: currentPrice,
+      isRealtimeMTF: true
+    };
+  }
+
+  /**
    * Check for real-time breakout (called every 30 seconds between candle closes)
    * Detects breakouts as they happen, with 60-second confirmation to filter wicks
    *
@@ -735,7 +864,35 @@ class BreakoutADXStrategy {
       };
     }
 
-    // All filters passed - generate signal!
+    // All filters passed - breakout confirmed!
+    // Clear breakout tracking (confirmation consumed)
+    this.clearRealtimeBreakout();
+
+    // Update lastSignal for trend continuation
+    this.lastSignal = direction;
+
+    // If MTF is enabled, store as pending signal and wait for pullback
+    if (Config.ENABLE_MTF) {
+      this.realtimeMTFPending = direction;
+      this.realtimeMTFBreakoutPrice = currentPrice;
+      this.realtimeMTFTime = Date.now();
+      this.realtimeMTFBestPullback = currentPrice; // Start tracking from current price
+      this.saveState();
+
+      this.logger.info(`🔔 Realtime ${direction} breakout CONFIRMED at $${currentPrice.toFixed(2)}`);
+      this.logger.info(`   Waiting for pullback of $${Config.pipsToPrice(Config.MTF_PULLBACK_PIPS).toFixed(2)} before entry...`);
+      this.logger.info(`   Max wait: ${Config.MTF_MAX_WAIT_CANDLES * 15} minutes (${Config.MTF_MAX_WAIT_CANDLES} M15 candles)`);
+
+      return {
+        signal: null,
+        pendingMTF: true,
+        direction,
+        reason: `Realtime ${direction} breakout confirmed, waiting for pullback entry`,
+        confidence: 0
+      };
+    }
+
+    // MTF disabled - generate signal immediately (old behavior)
     let confidence = 60; // Base confidence for realtime breakout
     if (adx !== null && adx > 25) confidence += 10;
     if (adx !== null && adx > 30) confidence += 10;
@@ -744,12 +901,6 @@ class BreakoutADXStrategy {
     const reason = `Realtime ${direction} breakout: Price $${currentPrice.toFixed(2)} broke ${direction === 'LONG' ? 'above' : 'below'} $${breakoutLevel.toFixed(2)}, confirmed after ${elapsedSec}s, ADX ${adx?.toFixed(1) || 'N/A'}`;
 
     this.logger.info(`🎯 Realtime: SIGNAL GENERATED - ${direction} @ $${currentPrice.toFixed(2)}`);
-
-    // Clear tracking (signal consumed)
-    this.clearRealtimeBreakout();
-
-    // Update lastSignal for trend continuation
-    this.lastSignal = direction;
 
     return {
       signal: direction,

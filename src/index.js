@@ -1201,6 +1201,7 @@ class GoldTradingBot {
   /**
    * Check for real-time breakouts (runs every 30 seconds)
    * Detects breakouts as they happen, not just at candle close
+   * With MTF enabled, waits for pullback before entering
    */
   async checkRealtimeBreakout() {
     try {
@@ -1217,6 +1218,10 @@ class GoldTradingBot {
       const hasPosition = existingTrades.some(t => t.instrument === Config.TRADING_SYMBOL);
       if (hasPosition) {
         logger.debug('🔍 Realtime check skipped - already have position');
+        // Clear any pending MTF signal if we have a position
+        if (this.breakoutStrategy.hasRealtimeMTFPending()) {
+          this.breakoutStrategy.clearRealtimeMTF();
+        }
         return;
       }
 
@@ -1234,9 +1239,9 @@ class GoldTradingBot {
         return;
       }
 
-      // Check if there's a pending MTF signal (don't interfere)
+      // Check if there's a pending candle-based MTF signal (don't interfere)
       if (this.breakoutStrategy.pendingSignal) {
-        logger.debug('🔍 Realtime check skipped - pending MTF signal');
+        logger.debug('🔍 Realtime check skipped - pending candle-based MTF signal');
         return;
       }
 
@@ -1244,6 +1249,71 @@ class GoldTradingBot {
       const priceData = await this.client.getPrice(Config.TRADING_SYMBOL);
       const currentPrice = priceData.mid;
       logger.debug(`🔍 Realtime: Price=$${currentPrice.toFixed(2)}`);
+
+      // Check if there's a pending realtime MTF signal waiting for pullback
+      if (this.breakoutStrategy.hasRealtimeMTFPending()) {
+        const mtfResult = this.breakoutStrategy.checkRealtimeMTFEntry(currentPrice);
+
+        if (mtfResult.pending) {
+          // Log pending status periodically (not every check to reduce noise)
+          if (!this.lastRealtimeMTFLog || Date.now() - this.lastRealtimeMTFLog >= 30000) {
+            logger.info(`⏳ Realtime MTF: ${mtfResult.reason}`);
+            this.lastRealtimeMTFLog = Date.now();
+          }
+          return;
+        }
+
+        if (mtfResult.signal) {
+          // MTF pullback entry found!
+          logger.info('');
+          logger.info('🎯 REALTIME MTF PULLBACK ENTRY!');
+          logger.info(`Signal: ${mtfResult.signal}`);
+          logger.info(`Entry: $${mtfResult.entryPrice.toFixed(2)}`);
+          logger.info(`Confidence: ${mtfResult.confidence}%`);
+          logger.info(`Reason: ${mtfResult.reason}`);
+          logger.info('');
+
+          // Fetch candles for indicator calculation
+          const candles = await this.client.getCandles(Config.TRADING_SYMBOL, Config.TIMEFRAME, 60);
+          const completeCandles = candles.filter(c => c.complete);
+          const analysis = this.ta.analyze(completeCandles);
+
+          // Calculate entry levels
+          const levels = this.breakoutStrategy.calculateEntryLevels(analysis, mtfResult.signal, mtfResult.entryPrice);
+
+          // Calculate position size
+          const positionSize = this.riskManager.calculatePositionSize(levels.entryPrice, levels.stopLoss);
+
+          if (positionSize === 0) {
+            logger.error('Position size calculation failed');
+            return;
+          }
+
+          // Adjust units for direction
+          const units = mtfResult.signal === 'LONG' ? positionSize : -positionSize;
+
+          // Check risk management
+          const canTrade = await this.riskManager.canOpenTrade(levels.entryPrice, levels.stopLoss, Math.abs(units));
+
+          if (!canTrade.allowed) {
+            logger.risk(`Trade blocked: ${canTrade.reason}`);
+            return;
+          }
+
+          // Execute trade
+          await this.executeTrade(
+            mtfResult.signal,
+            units,
+            levels,
+            mtfResult.reason,
+            'Breakout + ADX (Realtime MTF)',
+            mtfResult.confidence
+          );
+          return;
+        }
+
+        // MTF signal was cleared (timeout or other reason) - continue to check for new breakouts
+      }
 
       // Fetch recent candles for indicator calculation (need ~50 for ADX/RSI)
       const candles = await this.client.getCandles(Config.TRADING_SYMBOL, Config.TIMEFRAME, 60);
@@ -1262,7 +1332,7 @@ class GoldTradingBot {
 
       // Check for real-time breakout
       const result = this.breakoutStrategy.checkRealtimeBreakout(currentPrice, adx, rsi);
-      logger.debug(`🔍 Realtime result: signal=${result.signal}, pending=${result.pending}, reason=${result.reason?.substring(0, 50)}...`);
+      logger.debug(`🔍 Realtime result: signal=${result.signal}, pending=${result.pending}, pendingMTF=${result.pendingMTF}, reason=${result.reason?.substring(0, 50)}...`);
 
       if (result.pending) {
         // Log pending status periodically (not every check to reduce noise)
@@ -1273,12 +1343,18 @@ class GoldTradingBot {
         return;
       }
 
+      if (result.pendingMTF) {
+        // Breakout confirmed, now waiting for MTF pullback
+        logger.info(`⏳ Realtime: ${result.reason}`);
+        return;
+      }
+
       if (!result.signal) {
         // No breakout - nothing to do
         return;
       }
 
-      // We have a confirmed real-time breakout signal!
+      // We have a confirmed real-time breakout signal (MTF disabled)
       logger.info('');
       logger.info('🎯 REAL-TIME BREAKOUT SIGNAL!');
       logger.info(`Signal: ${result.signal}`);
