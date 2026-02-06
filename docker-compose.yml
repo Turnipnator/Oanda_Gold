@@ -82,6 +82,9 @@ services:
       # Trade Cooldown - prevents rapid re-entries after stop-loss
       - TRADE_COOLDOWN_HOURS=${TRADE_COOLDOWN_HOURS:-4}
 
+      # Max Slippage Protection - worst acceptable fill price distance from entry
+      - MAX_SLIPPAGE_PIPS=${MAX_SLIPPAGE_PIPS:-200}
+
       # Position Sizing
       - MIN_POSITION_SIZE=${MIN_POSITION_SIZE:-100}
       - MAX_POSITION_SIZE=${MAX_POSITION_SIZE:-50000}

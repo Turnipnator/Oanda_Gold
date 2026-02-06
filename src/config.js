@@ -132,6 +132,11 @@ class Config {
   // Prevents repeated losses on the same failed breakout level
   static TRADE_COOLDOWN_HOURS = parseFloat(process.env.TRADE_COOLDOWN_HOURS || '4'); // 4 hours = 1 H4 candle
 
+  // Max slippage protection - worst acceptable fill price distance from intended entry
+  // If market has moved more than this from our intended entry, order is rejected (not filled at bad price)
+  // 200 pips = $2.00 - generous for spread + minor slippage, rejects catastrophic fills
+  static MAX_SLIPPAGE_PIPS = parseFloat(process.env.MAX_SLIPPAGE_PIPS || '200');
+
   // Position Sizing (Oanda uses units: 1 unit = $1 worth of gold)
   static MIN_POSITION_SIZE = parseInt(process.env.MIN_POSITION_SIZE || '100');
   static MAX_POSITION_SIZE = parseInt(process.env.MAX_POSITION_SIZE || '50000');

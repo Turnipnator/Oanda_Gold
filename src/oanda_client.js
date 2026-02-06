@@ -155,8 +155,13 @@ class OandaClient {
 
   /**
    * Place a market order
+   * @param {string} instrument - Trading instrument (e.g., 'XAU_USD')
+   * @param {number} units - Position size (positive=LONG, negative=SHORT)
+   * @param {number|null} stopLoss - Stop loss price
+   * @param {number|null} takeProfit - Take profit price
+   * @param {number|null} priceBound - Worst acceptable fill price (rejects if slippage exceeds this)
    */
-  async placeMarketOrder(instrument, units, stopLoss, takeProfit = null) {
+  async placeMarketOrder(instrument, units, stopLoss, takeProfit = null, priceBound = null) {
     try {
       const orderSpec = {
         order: {
@@ -167,6 +172,11 @@ class OandaClient {
           positionFill: 'DEFAULT'
         }
       };
+
+      // Add price bound for slippage protection
+      if (priceBound !== null) {
+        orderSpec.order.priceBound = priceBound.toFixed(2);
+      }
 
       // Add stop loss
       if (stopLoss) {

@@ -784,11 +784,21 @@ class GoldTradingBot {
         takeProfit = levels.takeProfit1;
       }
 
+      // Calculate price bound for slippage protection
+      // LONG: max fill = entry + slippage, SHORT: min fill = entry - slippage
+      const isLongOrder = signal === 'LONG';
+      const slippageAmount = Config.pipsToPrice(Config.MAX_SLIPPAGE_PIPS);
+      const priceBound = isLongOrder
+        ? levels.entryPrice + slippageAmount
+        : levels.entryPrice - slippageAmount;
+      logger.info(`🛡️ Max fill price: $${priceBound.toFixed(2)} (max slippage: $${slippageAmount.toFixed(2)})`);
+
       let order = await this.client.placeMarketOrder(
         Config.TRADING_SYMBOL,
         units,
         levels.stopLoss,
-        takeProfit
+        takeProfit,
+        priceBound
       );
 
       // Order retry logic - handle common failures
@@ -812,7 +822,8 @@ class GoldTradingBot {
             Config.TRADING_SYMBOL,
             units,
             newStopLoss,
-            takeProfit
+            takeProfit,
+            priceBound
           );
 
           if (order.success) {
@@ -826,7 +837,8 @@ class GoldTradingBot {
               Config.TRADING_SYMBOL,
               units,
               null,  // No stop loss
-              null   // No take profit
+              null,  // No take profit
+              priceBound  // Still protect against slippage
             );
 
             if (order.success) {
