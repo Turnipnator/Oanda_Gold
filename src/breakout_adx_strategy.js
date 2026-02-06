@@ -32,6 +32,7 @@ const STATE_FILE = path.join(DATA_DIR, 'breakout_adx_state.json');
 
 // Strategy parameters (now configurable via Config)
 const ADX_MIN = 20;            // Minimum ADX for trending market
+const FAKEOUT_COOLDOWN_MINUTES = 15; // After momentum filter rejects a breakout as fakeout, ignore same direction for this long
 
 class BreakoutADXStrategy {
   constructor(logger, technicalAnalysis) {
@@ -62,6 +63,10 @@ class BreakoutADXStrategy {
     this.realtimeMTFBreakoutPrice = null;   // Price at breakout confirmation
     this.realtimeMTFTime = null;            // When breakout was confirmed
     this.realtimeMTFBestPullback = null;    // Best pullback price seen (lowest for LONG, highest for SHORT)
+
+    // Fakeout cooldown - prevents re-trying same direction after momentum filter rejection
+    this.fakeoutCooldownDirection = null;   // 'LONG' or 'SHORT'
+    this.fakeoutCooldownTime = null;        // Timestamp of rejection
 
     // Load persisted state on startup
     this.loadState();
@@ -95,6 +100,9 @@ class BreakoutADXStrategy {
         realtimeMTFBreakoutPrice: this.realtimeMTFBreakoutPrice,
         realtimeMTFTime: this.realtimeMTFTime,
         realtimeMTFBestPullback: this.realtimeMTFBestPullback,
+        // Fakeout cooldown
+        fakeoutCooldownDirection: this.fakeoutCooldownDirection,
+        fakeoutCooldownTime: this.fakeoutCooldownTime,
         savedAt: new Date().toISOString()
       };
 
@@ -137,6 +145,10 @@ class BreakoutADXStrategy {
       this.realtimeMTFBreakoutPrice = state.realtimeMTFBreakoutPrice || null;
       this.realtimeMTFTime = state.realtimeMTFTime || null;
       this.realtimeMTFBestPullback = state.realtimeMTFBestPullback || null;
+
+      // Fakeout cooldown
+      this.fakeoutCooldownDirection = state.fakeoutCooldownDirection || null;
+      this.fakeoutCooldownTime = state.fakeoutCooldownTime || null;
 
       this.logger.info(`📂 Loaded Breakout+ADX state: High=$${this.previousHigh?.toFixed(2) || 'null'}, Low=$${this.previousLow?.toFixed(2) || 'null'}`);
       if (this.pendingSignal) {
@@ -808,6 +820,23 @@ class BreakoutADXStrategy {
       ? currentPrice - this.previousHigh
       : this.previousLow - currentPrice;
 
+    // Check fakeout cooldown - if same direction was rejected by momentum filter recently, skip
+    if (this.fakeoutCooldownDirection === direction && this.fakeoutCooldownTime) {
+      const cooldownMs = FAKEOUT_COOLDOWN_MINUTES * 60 * 1000;
+      const elapsed = now - this.fakeoutCooldownTime;
+      if (elapsed < cooldownMs) {
+        const remainingMin = Math.ceil((cooldownMs - elapsed) / 60000);
+        return {
+          signal: null,
+          reason: `${direction} breakout ignored - fakeout cooldown (${remainingMin}min remaining)`,
+          confidence: 0
+        };
+      }
+      // Cooldown expired, clear it
+      this.fakeoutCooldownDirection = null;
+      this.fakeoutCooldownTime = null;
+    }
+
     // First detection of this breakout?
     if (!this.realtimeBreakoutDirection || this.realtimeBreakoutDirection !== direction) {
       // New breakout or direction changed - start tracking
@@ -892,6 +921,14 @@ class BreakoutADXStrategy {
     // If any filters failed, reject
     if (filters.length > 0) {
       this.logger.info(`❌ Realtime: Breakout filtered - ${filters.join(', ')}`);
+
+      // If momentum filter triggered (fakeout), start cooldown to prevent immediate retry
+      if (!momentumValid) {
+        this.fakeoutCooldownDirection = direction;
+        this.fakeoutCooldownTime = Date.now();
+        this.logger.info(`⏳ Fakeout cooldown: ${direction} breakouts blocked for ${FAKEOUT_COOLDOWN_MINUTES} minutes`);
+      }
+
       this.clearRealtimeBreakout();
       return {
         signal: null,
