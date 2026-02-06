@@ -130,7 +130,7 @@ class Config {
   // Trade cooldown - prevents rapid-fire re-entries after stop-loss
   // After any trade closes (win or lose), wait this long before entering again
   // Prevents repeated losses on the same failed breakout level
-  static TRADE_COOLDOWN_HOURS = parseFloat(process.env.TRADE_COOLDOWN_HOURS || '4'); // 4 hours = 1 H4 candle
+  static TRADE_COOLDOWN_HOURS = parseFloat(process.env.TRADE_COOLDOWN_HOURS || '1'); // 1 hour - other filters now handle fakeout prevention
 
   // Max slippage protection - worst acceptable fill price distance from intended entry
   // If market has moved more than this from our intended entry, order is rejected (not filled at bad price)

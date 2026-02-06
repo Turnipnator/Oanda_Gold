@@ -80,7 +80,7 @@ services:
       - BREAKOUT_MIN_CANDLE_POSITION=${BREAKOUT_MIN_CANDLE_POSITION:-0.4}
 
       # Trade Cooldown - prevents rapid re-entries after stop-loss
-      - TRADE_COOLDOWN_HOURS=${TRADE_COOLDOWN_HOURS:-4}
+      - TRADE_COOLDOWN_HOURS=${TRADE_COOLDOWN_HOURS:-1}
 
       # Max Slippage Protection - worst acceptable fill price distance from entry
       - MAX_SLIPPAGE_PIPS=${MAX_SLIPPAGE_PIPS:-200}
