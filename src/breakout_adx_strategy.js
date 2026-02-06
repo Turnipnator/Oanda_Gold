@@ -250,6 +250,21 @@ class BreakoutADXStrategy {
     }
 
     if (entryFound) {
+      // Check we're not chasing - entry should be near or better than breakout price
+      const maxOvershoot = 1.00; // Allow $1.00 tolerance past breakout
+      const chasingMove = isLong
+        ? entryPrice > breakoutPrice + maxOvershoot
+        : entryPrice < breakoutPrice - maxOvershoot;
+
+      if (chasingMove) {
+        const overshoot = isLong
+          ? entryPrice - breakoutPrice
+          : breakoutPrice - entryPrice;
+        this.logger.info(`❌ MTF Entry rejected - price $${entryPrice.toFixed(2)} is $${overshoot.toFixed(2)} past breakout $${breakoutPrice.toFixed(2)} (chasing move)`);
+        // Don't clear pending - next candle might be better
+        return null;
+      }
+
       this.logger.info(`✅ MTF Entry Found! ${this.pendingSignal} @ $${entryPrice.toFixed(2)}`);
       this.logger.info(`   ${entryReason}`);
 
@@ -702,7 +717,28 @@ class BreakoutADXStrategy {
       };
     }
 
-    // Entry conditions met!
+    // Entry conditions met - but check we're not chasing the move
+    // The whole point of MTF pullback is a BETTER entry than the breakout price
+    // If price has run past the breakout, the pullback didn't give us an edge - skip it
+    const maxOvershoot = 1.00; // Allow $1.00 tolerance past breakout
+    const chasingMove = isLong
+      ? currentPrice > breakoutPrice + maxOvershoot
+      : currentPrice < breakoutPrice - maxOvershoot;
+
+    if (chasingMove) {
+      const overshoot = isLong
+        ? currentPrice - breakoutPrice
+        : breakoutPrice - currentPrice;
+      this.logger.info(`❌ Realtime MTF: Entry rejected - price $${currentPrice.toFixed(2)} is $${overshoot.toFixed(2)} past breakout $${breakoutPrice.toFixed(2)} (chasing move, max $${maxOvershoot.toFixed(2)} overshoot)`);
+      // Don't clear pending - price might pull back again for a better entry
+      return {
+        signal: null,
+        pending: true,
+        reason: `Entry rejected - chasing move ($${overshoot.toFixed(2)} past breakout, max $${maxOvershoot.toFixed(2)})`,
+        confidence: 0
+      };
+    }
+
     const improvement = isLong
       ? breakoutPrice - currentPrice
       : currentPrice - breakoutPrice;
