@@ -263,7 +263,7 @@ class BreakoutADXStrategy {
 
     if (entryFound) {
       // Check we're not chasing - entry should be near or better than breakout price
-      const maxOvershoot = 1.00; // Allow $1.00 tolerance past breakout
+      const maxOvershoot = 0.50; // Allow $0.50 tolerance past breakout
       const chasingMove = isLong
         ? entryPrice > breakoutPrice + maxOvershoot
         : entryPrice < breakoutPrice - maxOvershoot;
@@ -732,7 +732,7 @@ class BreakoutADXStrategy {
     // Entry conditions met - but check we're not chasing the move
     // The whole point of MTF pullback is a BETTER entry than the breakout price
     // If price has run past the breakout, the pullback didn't give us an edge - skip it
-    const maxOvershoot = 1.00; // Allow $1.00 tolerance past breakout
+    const maxOvershoot = 0.50; // Allow $0.50 tolerance past breakout
     const chasingMove = isLong
       ? currentPrice > breakoutPrice + maxOvershoot
       : currentPrice < breakoutPrice - maxOvershoot;
