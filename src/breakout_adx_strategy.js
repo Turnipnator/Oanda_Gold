@@ -702,6 +702,16 @@ class BreakoutADXStrategy {
       ? breakoutPrice - this.realtimeMTFBestPullback
       : this.realtimeMTFBestPullback - breakoutPrice;
 
+    // Max pullback depth - if pullback exceeds this, the breakout has failed/reversed
+    // A healthy pullback is $0.50-$3.00. Anything over $5.00 means price reversed through
+    // the breakout level and back into the channel - not a pullback, it's a failed breakout.
+    const MAX_PULLBACK_DEPTH = 5.00;
+    if (pullbackAmount > MAX_PULLBACK_DEPTH) {
+      this.logger.info(`❌ Realtime MTF: Pullback too deep ($${pullbackAmount.toFixed(2)} > max $${MAX_PULLBACK_DEPTH.toFixed(2)}) - breakout failed, canceling ${this.realtimeMTFPending}`);
+      this.clearRealtimeMTF();
+      return { signal: null, reason: `Pullback too deep ($${pullbackAmount.toFixed(2)}) - breakout failed`, confidence: 0 };
+    }
+
     // Check if we've had enough pullback
     if (pullbackAmount < pullbackTarget) {
       const remaining = (pullbackTarget - pullbackAmount).toFixed(2);
