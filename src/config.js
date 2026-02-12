@@ -99,7 +99,7 @@ class Config {
 
   // Breakout-specific settings (wider to survive post-breakout volatility)
   // Breakouts at major levels (like $5000) have big whipsaws - need room to breathe
-  static BREAKOUT_STOP_LOSS_PIPS = parseFloat(process.env.BREAKOUT_STOP_LOSS_PIPS || '550'); // $5.50 SL for breakouts
+  static BREAKOUT_STOP_LOSS_PIPS = parseFloat(process.env.BREAKOUT_STOP_LOSS_PIPS || '400'); // $4.00 SL for breakouts (reduced from $5.50 - trades fail in seconds anyway)
   static BREAKOUT_TRAILING_ACTIVATION_PIPS = parseFloat(process.env.BREAKOUT_TRAILING_ACTIVATION_PIPS || '350'); // $3.50 profit before trailing
 
   // Breakout Strategy Settings
@@ -130,7 +130,7 @@ class Config {
   // Trade cooldown - prevents rapid-fire re-entries after stop-loss
   // After any trade closes (win or lose), wait this long before entering again
   // Prevents repeated losses on the same failed breakout level
-  static TRADE_COOLDOWN_HOURS = parseFloat(process.env.TRADE_COOLDOWN_HOURS || '1'); // 1 hour - other filters now handle fakeout prevention
+  static TRADE_COOLDOWN_HOURS = parseFloat(process.env.TRADE_COOLDOWN_HOURS || '2'); // 2 hours - 1h caused losses right at cooldown expiry (Feb 6, 9, 10)
 
   // Max slippage protection - worst acceptable fill price distance from intended entry
   // If market has moved more than this from our intended entry, order is rejected (not filled at bad price)

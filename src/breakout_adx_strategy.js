@@ -3,10 +3,10 @@
  *
  * Entry Rules (Primary Timeframe - configurable via TIMEFRAME env var):
  * - LONG: Price breaks ABOVE N-bar high (Donchian Channel)
- *         + ADX > 20 (trending market confirmation)
+ *         + ADX > 25 (trending market confirmation)
  *         + Bullish candle (close > open)
  * - SHORT: Price breaks BELOW N-bar low (Donchian Channel)
- *          + ADX > 20 (trending market confirmation)
+ *          + ADX > 25 (trending market confirmation)
  *          + Bearish candle (close < open)
  *
  * MTF Entry Refinement (Entry Timeframe - configurable via MTF_ENTRY_TIMEFRAME):
@@ -31,7 +31,7 @@ const DATA_DIR = process.env.NODE_ENV === 'production' ? '/app/data' : path.join
 const STATE_FILE = path.join(DATA_DIR, 'breakout_adx_state.json');
 
 // Strategy parameters (now configurable via Config)
-const ADX_MIN = 20;            // Minimum ADX for trending market
+const ADX_MIN = 25;            // Minimum ADX for trending market (raised from 20 - fewer but higher quality breakouts)
 const FAKEOUT_COOLDOWN_MINUTES = 15; // After momentum filter rejects a breakout as fakeout, ignore same direction for this long
 
 class BreakoutADXStrategy {
