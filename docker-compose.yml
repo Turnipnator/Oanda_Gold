@@ -50,7 +50,7 @@ services:
       - ENABLE_TRAILING_STOP=${ENABLE_TRAILING_STOP:-true}
 
       # Breakout-specific settings (wider to survive post-breakout volatility)
-      - BREAKOUT_STOP_LOSS_PIPS=${BREAKOUT_STOP_LOSS_PIPS:-550}
+      - BREAKOUT_STOP_LOSS_PIPS=${BREAKOUT_STOP_LOSS_PIPS:-400}
       - BREAKOUT_TRAILING_ACTIVATION_PIPS=${BREAKOUT_TRAILING_ACTIVATION_PIPS:-350}
       - BREAKOUT_LOOKBACK=${BREAKOUT_LOOKBACK:-10}
 
@@ -80,7 +80,7 @@ services:
       - BREAKOUT_MIN_CANDLE_POSITION=${BREAKOUT_MIN_CANDLE_POSITION:-0.4}
 
       # Trade Cooldown - prevents rapid re-entries after stop-loss
-      - TRADE_COOLDOWN_HOURS=${TRADE_COOLDOWN_HOURS:-1}
+      - TRADE_COOLDOWN_HOURS=${TRADE_COOLDOWN_HOURS:-2}
 
       # Max Slippage Protection - worst acceptable fill price distance from entry
       - MAX_SLIPPAGE_PIPS=${MAX_SLIPPAGE_PIPS:-200}
