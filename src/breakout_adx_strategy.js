@@ -4,9 +4,11 @@
  * Entry Rules (Primary Timeframe - configurable via TIMEFRAME env var):
  * - LONG: Price breaks ABOVE N-bar high (Donchian Channel)
  *         + ADX > 25 (trending market confirmation)
+ *         + EMA20 > EMA50 (trend alignment - don't go LONG in bearish trend)
  *         + Bullish candle (close > open)
  * - SHORT: Price breaks BELOW N-bar low (Donchian Channel)
  *          + ADX > 25 (trending market confirmation)
+ *          + EMA20 < EMA50 (trend alignment - don't go SHORT in bullish trend)
  *          + Bearish candle (close < open)
  *
  * MTF Entry Refinement (Entry Timeframe - configurable via MTF_ENTRY_TIMEFRAME):
@@ -406,6 +408,14 @@ class BreakoutADXStrategy {
         signal = null;
       }
 
+      // TREND ALIGNMENT: Don't go LONG against a bearish EMA trend
+      const emaFast = analysis.indicators.emaFast;
+      const emaSlow = analysis.indicators.emaSlow;
+      if (signal && emaFast !== null && emaSlow !== null && emaFast < emaSlow) {
+        filters.push(`Counter-trend: LONG but EMA${Config.EMA_FAST} ($${emaFast.toFixed(2)}) < EMA${Config.EMA_SLOW} ($${emaSlow.toFixed(2)})`);
+        signal = null;
+      }
+
       // Apply bullish candle filter
       // EXCEPTION: If ADX > 40 (very strong trend), bypass candle confirmation
       const CANDLE_ADX_OVERRIDE = 40;
@@ -467,6 +477,16 @@ class BreakoutADXStrategy {
       if (adx !== null && adx < ADX_MIN) {
         filters.push(`ADX ${adx.toFixed(1)} < ${ADX_MIN} (ranging market)`);
         signal = null;
+      }
+
+      // TREND ALIGNMENT: Don't go SHORT against a bullish EMA trend
+      {
+        const emaFast = analysis.indicators.emaFast;
+        const emaSlow = analysis.indicators.emaSlow;
+        if (signal && emaFast !== null && emaSlow !== null && emaFast > emaSlow) {
+          filters.push(`Counter-trend: SHORT but EMA${Config.EMA_FAST} ($${emaFast.toFixed(2)}) > EMA${Config.EMA_SLOW} ($${emaSlow.toFixed(2)})`);
+          signal = null;
+        }
       }
 
       // Apply bearish candle filter
@@ -634,6 +654,30 @@ class BreakoutADXStrategy {
   }
 
   /**
+   * Clear ALL pending breakout state (called when trade cooldown starts)
+   * Prevents stale breakout tracking from surviving through cooldown periods
+   */
+  clearAllPendingState() {
+    const hadState = this.realtimeBreakoutDirection || this.realtimeMTFPending || this.pendingSignal;
+    this.realtimeBreakoutDirection = null;
+    this.realtimeBreakoutTime = null;
+    this.realtimeBreakoutPrice = null;
+    this.realtimeBreakoutLevel = null;
+    this.realtimeMTFPending = null;
+    this.realtimeMTFBreakoutPrice = null;
+    this.realtimeMTFTime = null;
+    this.realtimeMTFBestPullback = null;
+    this.pendingSignal = null;
+    this.pendingSignalTime = null;
+    this.pendingBreakoutPrice = null;
+    this.h1CandlesChecked = 0;
+    if (hadState) {
+      this.logger.info('🧹 Cleared all pending breakout state (cooldown started)');
+    }
+    this.saveState();
+  }
+
+  /**
    * Clear real-time breakout tracking
    */
   clearRealtimeBreakout() {
@@ -791,9 +835,11 @@ class BreakoutADXStrategy {
    * @param {number} currentPrice - Current market price
    * @param {number} adx - Current ADX value
    * @param {number} rsi - Current RSI value
+   * @param {number} emaFast - EMA20 value (for trend alignment)
+   * @param {number} emaSlow - EMA50 value (for trend alignment)
    * @returns {Object} { signal: 'LONG'|'SHORT'|null, reason, confidence, pending?, isRealtime? }
    */
-  checkRealtimeBreakout(currentPrice, adx, rsi) {
+  checkRealtimeBreakout(currentPrice, adx, rsi, emaFast = null, emaSlow = null) {
     // Need channel values from previous candle close
     if (this.previousHigh === null || this.previousLow === null) {
       return {
@@ -909,6 +955,20 @@ class BreakoutADXStrategy {
     // ADX filter
     if (adx !== null && adx < ADX_MIN) {
       filters.push(`ADX ${adx.toFixed(1)} < ${ADX_MIN} (ranging market)`);
+    }
+
+    // TREND ALIGNMENT FILTER: Don't trade against the EMA trend
+    // LONG breakouts should only happen in bullish trend (EMA20 > EMA50)
+    // SHORT breakouts should only happen in bearish trend (EMA20 < EMA50)
+    if (emaFast !== null && emaSlow !== null) {
+      const trendBullish = emaFast > emaSlow;
+      const trendBearish = emaFast < emaSlow;
+      if (direction === 'LONG' && trendBearish) {
+        filters.push(`Counter-trend: LONG breakout but EMA${Config.EMA_FAST} ($${emaFast.toFixed(2)}) < EMA${Config.EMA_SLOW} ($${emaSlow.toFixed(2)}) = bearish trend`);
+      }
+      if (direction === 'SHORT' && trendBullish) {
+        filters.push(`Counter-trend: SHORT breakout but EMA${Config.EMA_FAST} ($${emaFast.toFixed(2)}) > EMA${Config.EMA_SLOW} ($${emaSlow.toFixed(2)}) = bullish trend`);
+      }
     }
 
     // RSI filter (with ADX override)

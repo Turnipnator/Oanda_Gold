@@ -284,6 +284,11 @@ class GoldTradingBot {
             this.saveCooldown();
             logger.info(`⏳ Trade cooldown started - next trade in ${Config.TRADE_COOLDOWN_HOURS} hours`);
 
+            // Clear all pending breakout state to prevent stale tracking surviving cooldown
+            if (this.breakoutStrategy) {
+              this.breakoutStrategy.clearAllPendingState();
+            }
+
             // Send Telegram notification if available
             if (this.telegramBot) {
               try {
@@ -1177,6 +1182,11 @@ class GoldTradingBot {
             this.saveCooldown();
             logger.info(`⏳ Trade cooldown started - next trade in ${Config.TRADE_COOLDOWN_HOURS} hours`);
 
+            // Clear all pending breakout state to prevent stale tracking surviving cooldown
+            if (this.breakoutStrategy) {
+              this.breakoutStrategy.clearAllPendingState();
+            }
+
             // Notify via Telegram
             if (this.telegramBot) {
               try {
@@ -1342,8 +1352,10 @@ class GoldTradingBot {
       const rsi = analysis.indicators.rsi;
       logger.debug(`🔍 Realtime: ADX=${adx?.toFixed(1)}, RSI=${rsi?.toFixed(1)}, Channel=$${this.breakoutStrategy.previousLow?.toFixed(2)}-$${this.breakoutStrategy.previousHigh?.toFixed(2)}`);
 
-      // Check for real-time breakout
-      const result = this.breakoutStrategy.checkRealtimeBreakout(currentPrice, adx, rsi);
+      // Check for real-time breakout (pass EMA values for trend alignment filter)
+      const emaFast = analysis.indicators.emaFast;
+      const emaSlow = analysis.indicators.emaSlow;
+      const result = this.breakoutStrategy.checkRealtimeBreakout(currentPrice, adx, rsi, emaFast, emaSlow);
       logger.debug(`🔍 Realtime result: signal=${result.signal}, pending=${result.pending}, pendingMTF=${result.pendingMTF}, reason=${result.reason?.substring(0, 50)}...`);
 
       if (result.pending) {
