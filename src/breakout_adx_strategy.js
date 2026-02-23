@@ -279,6 +279,20 @@ class BreakoutADXStrategy {
         return null;
       }
 
+      // Check minimum entry improvement - reject "fake pullbacks" where M15 wick
+      // touched the target but close is right back at breakout level ($0.00 improvement)
+      // Trade 758: M15 low hit target but close = breakout price, entered with no improvement, lost in 2 min
+      const MIN_ENTRY_IMPROVEMENT = 0.20; // $0.20 minimum improvement required
+      const improvement = isLong
+        ? breakoutPrice - entryPrice
+        : entryPrice - breakoutPrice;
+
+      if (improvement < MIN_ENTRY_IMPROVEMENT) {
+        this.logger.info(`❌ MTF Entry rejected - improvement $${improvement.toFixed(2)} < minimum $${MIN_ENTRY_IMPROVEMENT.toFixed(2)} (fake pullback - wick only, no real entry improvement)`);
+        // Don't clear pending - next candle might give a real pullback
+        return null;
+      }
+
       this.logger.info(`✅ MTF Entry Found! ${this.pendingSignal} @ $${entryPrice.toFixed(2)}`);
       this.logger.info(`   ${entryReason}`);
 
