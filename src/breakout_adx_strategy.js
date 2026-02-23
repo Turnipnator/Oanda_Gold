@@ -314,6 +314,18 @@ class BreakoutADXStrategy {
    * Returns: { signal: 'LONG' | 'SHORT' | null, reason: string, confidence: number }
    */
   evaluateSetup(analysis, candles, h1Candles = null) {
+    // If realtime MTF is already managing a pullback entry, don't override it
+    // The candle-close path was bypassing the realtime MTF's careful pullback wait
+    // (e.g. Trade 752: realtime waited for pullback, candle-close entered at $0.00 improvement)
+    if (this.realtimeMTFPending && Config.ENABLE_MTF) {
+      return {
+        signal: null,
+        reason: `Realtime MTF already tracking ${this.realtimeMTFPending} pullback at $${this.realtimeMTFBreakoutPrice?.toFixed(2)} - letting realtime path manage entry`,
+        confidence: 0,
+        pendingSignal: this.realtimeMTFPending
+      };
+    }
+
     // First check if we have a pending MTF signal and H1 data
     if (this.pendingSignal && Config.ENABLE_MTF && h1Candles) {
       const h1Entry = this.evaluateH1Entry(h1Candles);

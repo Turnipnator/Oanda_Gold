@@ -99,7 +99,7 @@ class Config {
 
   // Breakout-specific settings (wider to survive post-breakout volatility)
   // Breakouts at major levels (like $5000) have big whipsaws - need room to breathe
-  static BREAKOUT_STOP_LOSS_PIPS = parseFloat(process.env.BREAKOUT_STOP_LOSS_PIPS || '400'); // $4.00 SL for breakouts (reduced from $5.50 - trades fail in seconds anyway)
+  static BREAKOUT_STOP_LOSS_PIPS = parseFloat(process.env.BREAKOUT_STOP_LOSS_PIPS || '300'); // $3.00 SL for breakouts (reduced from $4.00 - same dollar risk but 35% more units = bigger wins)
   static BREAKOUT_TRAILING_ACTIVATION_PIPS = parseFloat(process.env.BREAKOUT_TRAILING_ACTIVATION_PIPS || '350'); // $3.50 profit before trailing
 
   // Breakout Strategy Settings
@@ -125,7 +125,7 @@ class Config {
   // Real-time breakout detection - checks price between candle closes
   // Detects breakouts as they happen, not just at candle close
   static REALTIME_CHECK_INTERVAL_SECONDS = parseInt(process.env.REALTIME_CHECK_INTERVAL_SECONDS || '30'); // Check every 30 seconds
-  static BREAKOUT_CONFIRMATION_SECONDS = parseInt(process.env.BREAKOUT_CONFIRMATION_SECONDS || '60'); // Wait 60s to filter wicks
+  static BREAKOUT_CONFIRMATION_SECONDS = parseInt(process.env.BREAKOUT_CONFIRMATION_SECONDS || '120'); // Wait 120s to filter wicks (doubled from 60s - too many reversals after 60s confirmation)
 
   // Trade cooldown - prevents rapid-fire re-entries after stop-loss
   // After any trade closes (win or lose), wait this long before entering again
