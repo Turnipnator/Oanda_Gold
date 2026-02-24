@@ -106,8 +106,10 @@ class Config {
   static BREAKOUT_LOOKBACK = parseInt(process.env.BREAKOUT_LOOKBACK || '10'); // Donchian channel period (10 = fewer, higher quality signals)
 
   // Trend Continuation Mode - re-enter on pullbacks during strong trends
-  // After a breakout, if ADX stays strong and price pulls back to EMA, enter again
-  static ENABLE_TREND_CONTINUATION = process.env.ENABLE_TREND_CONTINUATION !== 'false'; // true by default
+  // DISABLED: Trade 772 (Feb 24) entered LONG on "pullback to EMA20" during a $137 crash.
+  // EMAs lagged behind the reversal, so trend continuation saw a buy-the-dip in what was actually a dead cat bounce.
+  // 7 SHORT breakout signals earlier that day proved the trend had reversed. Lost -£349 in 2 minutes.
+  static ENABLE_TREND_CONTINUATION = process.env.ENABLE_TREND_CONTINUATION === 'true'; // false by default (was true)
   static TREND_CONTINUATION_ADX_MIN = parseFloat(process.env.TREND_CONTINUATION_ADX_MIN || '25'); // Strong trend threshold
   static TREND_CONTINUATION_PULLBACK_EMA = parseInt(process.env.TREND_CONTINUATION_PULLBACK_EMA || '20'); // Pullback to EMA20
 
