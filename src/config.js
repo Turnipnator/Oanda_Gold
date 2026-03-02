@@ -94,7 +94,7 @@ class Config {
 
   // Trailing Stop
   static ENABLE_TRAILING_STOP = process.env.ENABLE_TRAILING_STOP !== 'false';
-  static TRAILING_STOP_DISTANCE_PIPS = parseFloat(process.env.TRAILING_STOP_DISTANCE_PIPS || '150'); // $1.50 trail distance
+  static TRAILING_STOP_DISTANCE_PIPS = parseFloat(process.env.TRAILING_STOP_DISTANCE_PIPS || '75'); // $0.75 trail distance (was $1.50 - tighter trail improves R:R from 0.67:1 to 0.92:1)
   static TRAILING_ACTIVATION_PIPS = parseFloat(process.env.TRAILING_ACTIVATION_PIPS || '200'); // $2.00 profit before trailing activates
 
   // Breakout-specific settings (wider to survive post-breakout volatility)

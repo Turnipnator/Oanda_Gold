@@ -435,11 +435,18 @@ class BreakoutADXStrategy {
       }
 
       // TREND ALIGNMENT: Don't go LONG against a bearish EMA trend
+      // EXCEPTION: If ADX > 40 (very strong trend), EMAs may be lagging a genuine reversal
+      // On Mar 2, bot watched a $135 crash with ADX 43.6 but couldn't SHORT because EMAs hadn't crossed yet
+      const COUNTER_TREND_ADX_OVERRIDE = 40;
       const emaFast = analysis.indicators.emaFast;
       const emaSlow = analysis.indicators.emaSlow;
-      if (signal && emaFast !== null && emaSlow !== null && emaFast < emaSlow) {
+      const counterTrendAdxOverride = adx !== null && adx > COUNTER_TREND_ADX_OVERRIDE;
+      if (signal && emaFast !== null && emaSlow !== null && emaFast < emaSlow && !counterTrendAdxOverride) {
         filters.push(`Counter-trend: LONG but EMA${Config.EMA_FAST} ($${emaFast.toFixed(2)}) < EMA${Config.EMA_SLOW} ($${emaSlow.toFixed(2)})`);
         signal = null;
+      }
+      if (signal && emaFast !== null && emaSlow !== null && emaFast < emaSlow && counterTrendAdxOverride) {
+        this.logger.info(`🔥 ADX override: Counter-trend LONG but ADX ${adx.toFixed(1)} > ${COUNTER_TREND_ADX_OVERRIDE} confirms strong momentum - allowing entry despite EMA alignment`);
       }
 
       // Apply bullish candle filter
@@ -506,12 +513,18 @@ class BreakoutADXStrategy {
       }
 
       // TREND ALIGNMENT: Don't go SHORT against a bullish EMA trend
+      // EXCEPTION: If ADX > 40, EMAs may be lagging behind a genuine move
       {
+        const COUNTER_TREND_ADX_OVERRIDE = 40;
         const emaFast = analysis.indicators.emaFast;
         const emaSlow = analysis.indicators.emaSlow;
-        if (signal && emaFast !== null && emaSlow !== null && emaFast > emaSlow) {
+        const counterTrendAdxOverride = adx !== null && adx > COUNTER_TREND_ADX_OVERRIDE;
+        if (signal && emaFast !== null && emaSlow !== null && emaFast > emaSlow && !counterTrendAdxOverride) {
           filters.push(`Counter-trend: SHORT but EMA${Config.EMA_FAST} ($${emaFast.toFixed(2)}) > EMA${Config.EMA_SLOW} ($${emaSlow.toFixed(2)})`);
           signal = null;
+        }
+        if (signal && emaFast !== null && emaSlow !== null && emaFast > emaSlow && counterTrendAdxOverride) {
+          this.logger.info(`🔥 ADX override: Counter-trend SHORT but ADX ${adx.toFixed(1)} > ${COUNTER_TREND_ADX_OVERRIDE} confirms strong momentum - allowing entry despite EMA alignment`);
         }
       }
 
@@ -986,14 +999,23 @@ class BreakoutADXStrategy {
     // TREND ALIGNMENT FILTER: Don't trade against the EMA trend
     // LONG breakouts should only happen in bullish trend (EMA20 > EMA50)
     // SHORT breakouts should only happen in bearish trend (EMA20 < EMA50)
+    // EXCEPTION: If ADX > 40 (very strong momentum), EMAs may be lagging a genuine move
+    const COUNTER_TREND_ADX_OVERRIDE = 40;
+    const counterTrendAdxOverride = adx !== null && adx > COUNTER_TREND_ADX_OVERRIDE;
     if (emaFast !== null && emaSlow !== null) {
       const trendBullish = emaFast > emaSlow;
       const trendBearish = emaFast < emaSlow;
-      if (direction === 'LONG' && trendBearish) {
+      if (direction === 'LONG' && trendBearish && !counterTrendAdxOverride) {
         filters.push(`Counter-trend: LONG breakout but EMA${Config.EMA_FAST} ($${emaFast.toFixed(2)}) < EMA${Config.EMA_SLOW} ($${emaSlow.toFixed(2)}) = bearish trend`);
       }
-      if (direction === 'SHORT' && trendBullish) {
+      if (direction === 'LONG' && trendBearish && counterTrendAdxOverride) {
+        this.logger.info(`🔥 Realtime ADX override: Counter-trend LONG but ADX ${adx.toFixed(1)} > ${COUNTER_TREND_ADX_OVERRIDE} - allowing entry`);
+      }
+      if (direction === 'SHORT' && trendBullish && !counterTrendAdxOverride) {
         filters.push(`Counter-trend: SHORT breakout but EMA${Config.EMA_FAST} ($${emaFast.toFixed(2)}) > EMA${Config.EMA_SLOW} ($${emaSlow.toFixed(2)}) = bullish trend`);
+      }
+      if (direction === 'SHORT' && trendBullish && counterTrendAdxOverride) {
+        this.logger.info(`🔥 Realtime ADX override: Counter-trend SHORT but ADX ${adx.toFixed(1)} > ${COUNTER_TREND_ADX_OVERRIDE} - allowing entry`);
       }
     }
 
