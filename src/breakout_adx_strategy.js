@@ -33,7 +33,7 @@ const DATA_DIR = process.env.NODE_ENV === 'production' ? '/app/data' : path.join
 const STATE_FILE = path.join(DATA_DIR, 'breakout_adx_state.json');
 
 // Strategy parameters (now configurable via Config)
-const ADX_MIN = 25;            // Minimum ADX for trending market (raised from 20 - fewer but higher quality breakouts)
+const ADX_MIN = 35;            // Minimum ADX for trending market (raised from 25 - only trade strong trends)
 const FAKEOUT_COOLDOWN_MINUTES = 15; // After momentum filter rejects a breakout as fakeout, ignore same direction for this long
 
 class BreakoutADXStrategy {
