@@ -86,7 +86,7 @@ class Config {
   // TRAILING_ONLY=true: No fixed TP, let winners run with trailing stop (aggressive, for trends)
   // TRAILING_ONLY=false: Use fixed TP (safer, more predictable)
   static TRAILING_ONLY = process.env.TRAILING_ONLY === 'true'; // true = no TP, trail only
-  static TAKE_PROFIT_RR = parseFloat(process.env.TAKE_PROFIT_RR || '2.5'); // Only used if TRAILING_ONLY=false
+  static TAKE_PROFIT_RR = parseFloat(process.env.TAKE_PROFIT_RR || '1.0'); // 1:1 R:R - lock in $3.00 profit vs $3.00 SL (was 2.5 but breakouts reverse before reaching 2.5R)
   static ENABLE_STAGED_TP = process.env.ENABLE_STAGED_TP === 'true'; // false = single TP (if not trailing only)
   static TAKE_PROFIT_1_RR = parseFloat(process.env.TAKE_PROFIT_1_RR || '1.5'); // Only used if ENABLE_STAGED_TP=true
   static TAKE_PROFIT_2_RR = parseFloat(process.env.TAKE_PROFIT_2_RR || '2.5'); // Only used if ENABLE_STAGED_TP=true
