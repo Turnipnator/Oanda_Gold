@@ -895,6 +895,26 @@ class GoldTradingBot {
         }
       }
 
+      // Recalculate TP based on actual fill price (same reason as SL above)
+      // Without this, slippage makes TP closer than intended — e.g. 0.75:1 instead of 1:1
+      if (!Config.TRAILING_ONLY && !Config.ENABLE_STAGED_TP) {
+        const tpDistance = stopDistance * Config.TAKE_PROFIT_RR;
+        const correctTP = isLong
+          ? order.price + tpDistance
+          : order.price - tpDistance;
+
+        if (Math.abs(correctTP - levels.takeProfit1) > 0.01) {
+          logger.info(`🔧 Adjusting TP from $${levels.takeProfit1.toFixed(2)} to $${correctTP.toFixed(2)} (based on fill price $${order.price.toFixed(2)})`);
+          try {
+            await this.client.modifyTrade(order.tradeId, null, correctTP);
+            levels.takeProfit1 = correctTP;
+            levels.takeProfit2 = correctTP;
+          } catch (tpError) {
+            logger.warn(`Failed to adjust TP: ${tpError.message} - keeping original TP`);
+          }
+        }
+      }
+
       if (Config.TRAILING_ONLY) {
         logger.info(`📊 NO fixed TP - Trailing stop at ${Config.TRAILING_STOP_DISTANCE_PIPS} pips ($${(Config.TRAILING_STOP_DISTANCE_PIPS * 0.01).toFixed(2)}) will manage exit`);
         logger.info(`🎯 Let winners run! Trail follows price, locks in profit as it moves.`);
@@ -1162,56 +1182,105 @@ class GoldTradingBot {
 
         logger.info(`Trade ${tradeId} was closed`);
 
-        // Fetch close details from transaction history
+        // ALWAYS set cooldown — prevents rapid re-entries regardless of API success
+        this.lastTradeCloseTime = Date.now();
+        this.saveCooldown();
+        logger.info(`⏳ Trade cooldown started - next trade in ${Config.TRADE_COOLDOWN_HOURS} hours`);
+
+        // Clear all pending breakout state to prevent stale tracking surviving cooldown
+        if (this.breakoutStrategy) {
+          this.breakoutStrategy.clearAllPendingState();
+        }
+
+        // Try to fetch close details — first from /trades/{id}, then from recent transactions
+        let pnl = null;
+        let exitPrice = null;
+        let reason = 'Unknown';
+        const entryPrice = tracked.entryPrice;
+
         try {
+          // Method 1: Direct trade lookup
           const response = await this.client.makeRequest('GET', `/v3/accounts/${this.client.accountId}/trades/${tradeId}`);
           if (response.trade && response.trade.state === 'CLOSED') {
-            const trade = response.trade;
-            const entryPrice = parseFloat(trade.price);
-            const exitPrice = parseFloat(trade.averageClosePrice || entryPrice);
-            const pnl = parseFloat(trade.realizedPL || 0);
-            const pnlPct = (pnl / (entryPrice * Math.abs(parseFloat(trade.initialUnits)))) * 100;
-
-            const reason = trade.closeReason || 'Unknown';
-
-            logger.info(`💰 P&L: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%)`);
-            logger.info(`Reason: ${reason}`);
-
-            // Set cooldown timer to prevent rapid re-entries
-            this.lastTradeCloseTime = Date.now();
-            this.saveCooldown();
-            logger.info(`⏳ Trade cooldown started - next trade in ${Config.TRADE_COOLDOWN_HOURS} hours`);
-
-            // Clear all pending breakout state to prevent stale tracking surviving cooldown
-            if (this.breakoutStrategy) {
-              this.breakoutStrategy.clearAllPendingState();
-            }
-
-            // Notify via Telegram
-            if (this.telegramBot) {
-              try {
-                await this.telegramBot.notifyTradeClosed(
-                  tracked.symbol,
-                  entryPrice,
-                  exitPrice,
-                  pnl,
-                  pnlPct,
-                  reason,
-                  tracked.strategyName
-                );
-              } catch (telegramError) {
-                logger.warn(`Failed to send trade closed notification: ${telegramError.message}`);
-              }
-            }
-
-            // Update risk manager
-            this.riskManager.recordTrade(pnl);
-
-            // Update strategy tracker
-            this.tracker.closeTrade(tracked.strategyName, `LIVE_${trade.id}`, exitPrice, reason);
+            exitPrice = parseFloat(response.trade.averageClosePrice || entryPrice);
+            pnl = parseFloat(response.trade.realizedPL || 0);
+            reason = response.trade.closeReason || 'Unknown';
           }
         } catch (error) {
-          logger.warn(`Could not fetch close details for trade ${tradeId}: ${error.message}`);
+          logger.debug(`Trade lookup failed for ${tradeId}: ${error.message}`);
+        }
+
+        // Method 2: Search recent transactions for the close fill
+        if (pnl === null) {
+          try {
+            const fromId = parseInt(tradeId);
+            const toId = fromId + 20; // Close transaction is usually within a few IDs
+            const txResponse = await this.client.makeRequest('GET',
+              `/v3/accounts/${this.client.accountId}/transactions/idrange?from=${fromId}&to=${toId}`);
+            if (txResponse.transactions) {
+              const closeFill = txResponse.transactions.find(tx =>
+                tx.type === 'ORDER_FILL' && tx.tradesClosed &&
+                tx.tradesClosed.some(tc => tc.tradeID === String(tradeId))
+              );
+              if (closeFill) {
+                const closedTrade = closeFill.tradesClosed.find(tc => tc.tradeID === String(tradeId));
+                pnl = parseFloat(closedTrade.realizedPL || 0);
+                exitPrice = parseFloat(closedTrade.price || entryPrice);
+                reason = closeFill.reason || 'Unknown';
+              }
+            }
+          } catch (error) {
+            logger.debug(`Transaction lookup failed for ${tradeId}: ${error.message}`);
+          }
+        }
+
+        // Log P&L (use what we have, even if incomplete)
+        if (pnl !== null) {
+          const pnlPct = entryPrice ? (pnl / (entryPrice * Math.abs(tracked.units || 1))) * 100 : 0;
+          logger.info(`💰 P&L: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%)`);
+          logger.info(`Reason: ${reason}`);
+
+          // Update risk manager
+          this.riskManager.recordTrade(pnl);
+
+          // Notify via Telegram
+          if (this.telegramBot) {
+            try {
+              await this.telegramBot.notifyTradeClosed(
+                tracked.symbol,
+                entryPrice,
+                exitPrice || entryPrice,
+                pnl,
+                pnlPct,
+                reason,
+                tracked.strategyName
+              );
+            } catch (telegramError) {
+              logger.warn(`Failed to send trade closed notification: ${telegramError.message}`);
+            }
+          }
+
+          // Update strategy tracker
+          this.tracker.closeTrade(tracked.strategyName, `LIVE_${tradeId}`, exitPrice || entryPrice, reason);
+        } else {
+          logger.warn(`⚠️ Could not fetch P&L for trade ${tradeId} - cooldown still set`);
+
+          // Still notify via Telegram with what we know
+          if (this.telegramBot) {
+            try {
+              await this.telegramBot.notifyTradeClosed(
+                tracked.symbol,
+                entryPrice,
+                entryPrice, // unknown exit
+                0, // unknown P&L
+                0,
+                'Unknown (API lookup failed)',
+                tracked.strategyName
+              );
+            } catch (telegramError) {
+              logger.warn(`Failed to send trade closed notification: ${telegramError.message}`);
+            }
+          }
         }
       }
 
