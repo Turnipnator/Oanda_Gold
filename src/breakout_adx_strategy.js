@@ -503,11 +503,17 @@ class BreakoutADXStrategy {
       }
     }
     else if (bearishBreakout) {
+      // DIRECTION FILTER: Skip SHORT entries if disabled
+      if (!Config.ALLOW_SHORT) {
+        reason = `Bearish breakout detected but SHORT entries disabled (ALLOW_SHORT=false)`;
+        // Still update channel state but don't generate signal
+      } else {
       signal = 'SHORT';
       reason = `Bearish breakout: Price $${currentPrice.toFixed(2)} broke below ${Config.BREAKOUT_LOOKBACK}-bar low $${this.previousLow.toFixed(2)}`;
+      }
 
-      // Apply ADX filter
-      if (adx !== null && adx < ADX_MIN) {
+      // Apply ADX filter (only matters if signal is set)
+      if (signal && adx !== null && adx < ADX_MIN) {
         filters.push(`ADX ${adx.toFixed(1)} < ${ADX_MIN} (ranging market)`);
         signal = null;
       }
@@ -914,6 +920,18 @@ class BreakoutADXStrategy {
     const distanceFromLevel = bullishBreakout
       ? currentPrice - this.previousHigh
       : this.previousLow - currentPrice;
+
+    // DIRECTION FILTER: Skip SHORT entries if disabled (gold uptrend = shorting loses money)
+    if (direction === 'SHORT' && !Config.ALLOW_SHORT) {
+      if (this.realtimeBreakoutDirection === 'SHORT') {
+        this.clearRealtimeBreakout();
+      }
+      return {
+        signal: null,
+        reason: `SHORT breakout detected but SHORT entries disabled (ALLOW_SHORT=false)`,
+        confidence: 0
+      };
+    }
 
     // Check fakeout cooldown - if same direction was rejected by momentum filter recently, skip
     if (this.fakeoutCooldownDirection === direction && this.fakeoutCooldownTime) {

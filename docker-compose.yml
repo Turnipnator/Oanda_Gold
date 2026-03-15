@@ -29,6 +29,7 @@ services:
 
       # Strategy Parameters
       - STRATEGY_TYPE=${STRATEGY_TYPE:-breakout_adx}
+      - ALLOW_SHORT=${ALLOW_SHORT:-false}
       - EMA_FAST=${EMA_FAST:-20}
       - EMA_SLOW=${EMA_SLOW:-50}
       - RSI_PERIOD=${RSI_PERIOD:-14}

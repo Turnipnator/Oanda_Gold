@@ -51,6 +51,7 @@ class GoldTradingBot {
     // Initialize strategy tracker
     this.tracker = new StrategyTracker();
     this.tracker.registerStrategy('Breakout + ADX', liveStrategyName === 'Breakout + ADX');
+    this.tracker.registerStrategy('Breakout + ADX (Realtime MTF)', liveStrategyName === 'Breakout + ADX');
     this.tracker.registerStrategy('Triple Confirmation', liveStrategyName === 'Triple Confirmation');
 
     logger.info(`🟢 LIVE Strategy: ${liveStrategyName}`);

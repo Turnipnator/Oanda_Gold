@@ -65,6 +65,11 @@ class Config {
   // Strategy Selection
   static STRATEGY_TYPE = process.env.STRATEGY_TYPE || 'breakout_adx'; // 'breakout_adx' (recommended) or 'triple_confirmation'
 
+  // Direction Filter
+  // SHORT trades have 11% win rate post-Feb-6 (1W/8L) vs LONG 36% (5W/9L)
+  // Gold in long-term uptrend - shorting against it burns money
+  static ALLOW_SHORT = process.env.ALLOW_SHORT !== 'false'; // Set to 'false' to disable SHORT entries
+
   // Multi-Timeframe (MTF) Settings
   // With H1 primary: uses M15 for entry timing (better entries, higher win rate)
   // With H4 primary: uses H1 for entry timing
