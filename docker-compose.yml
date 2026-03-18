@@ -29,7 +29,7 @@ services:
 
       # Strategy Parameters
       - STRATEGY_TYPE=${STRATEGY_TYPE:-breakout_adx}
-      - ALLOW_SHORT=${ALLOW_SHORT:-false}
+      - ALLOW_SHORT=${ALLOW_SHORT:-true}
       - EMA_FAST=${EMA_FAST:-20}
       - EMA_SLOW=${EMA_SLOW:-50}
       - RSI_PERIOD=${RSI_PERIOD:-14}
@@ -115,8 +115,8 @@ services:
 
       # Trading Hours Filter (UK time) - avoids Asian session low liquidity
       # Default 08:00-22:00 UK skips wild wicks in early hours
-      - TRADING_START_HOUR=${TRADING_START_HOUR:-8}
-      - TRADING_END_HOUR=${TRADING_END_HOUR:-22}
+      - TRADING_START_HOUR=${TRADING_START_HOUR:-0}
+      - TRADING_END_HOUR=${TRADING_END_HOUR:-24}
 
       # Timezone
       - TZ=${TZ:-UTC}
