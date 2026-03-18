@@ -63,12 +63,32 @@ class Config {
   static MIN_CONFIDENCE = parseFloat(process.env.MIN_CONFIDENCE || '70'); // Skip setups below 70% confidence
 
   // Strategy Selection
-  static STRATEGY_TYPE = process.env.STRATEGY_TYPE || 'breakout_adx'; // 'breakout_adx' (recommended) or 'triple_confirmation'
+  static STRATEGY_TYPE = process.env.STRATEGY_TYPE || 'breakout_adx'; // 'breakout_adx', 'ema_trend', or 'triple_confirmation'
 
   // Direction Filter
   // SHORT trades have 11% win rate post-Feb-6 (1W/8L) vs LONG 36% (5W/9L)
   // Gold in long-term uptrend - shorting against it burns money
   static ALLOW_SHORT = process.env.ALLOW_SHORT !== 'false'; // Set to 'false' to disable SHORT entries
+
+  // EMA Trend Strategy Settings (ported from IG Gold backtest: PF=1.73, 47% WR)
+  // Uses fast EMAs + pullback entries + ATR-based stops instead of breakout detection
+  static EMA_TREND_FAST = parseInt(process.env.EMA_TREND_FAST || '3');
+  static EMA_TREND_MEDIUM = parseInt(process.env.EMA_TREND_MEDIUM || '8');
+  static EMA_TREND_SLOW = parseInt(process.env.EMA_TREND_SLOW || '21');
+  static EMA_TREND_ATR_PERIOD = parseInt(process.env.EMA_TREND_ATR_PERIOD || '14');
+  static EMA_TREND_ATR_SL_MULT = parseFloat(process.env.EMA_TREND_ATR_SL_MULT || '1.5');  // ATR multiplier for SL (lower than IG's 2.5 because H1 ATR >> 5m ATR)
+  static EMA_TREND_TP_RR = parseFloat(process.env.EMA_TREND_TP_RR || '2.0');  // 2:1 R:R
+  static EMA_TREND_ADX_MIN = parseFloat(process.env.EMA_TREND_ADX_MIN || '30');
+  static EMA_TREND_RSI_OB = parseFloat(process.env.EMA_TREND_RSI_OB || '85');  // Overbought (wide — Gold trends push RSI high)
+  static EMA_TREND_RSI_OS = parseFloat(process.env.EMA_TREND_RSI_OS || '15');  // Oversold
+  static EMA_TREND_RSI_BUY_MAX = parseFloat(process.env.EMA_TREND_RSI_BUY_MAX || '60');
+  static EMA_TREND_RSI_SELL_MIN = parseFloat(process.env.EMA_TREND_RSI_SELL_MIN || '40');
+  static EMA_TREND_PULLBACK_PCT = parseFloat(process.env.EMA_TREND_PULLBACK_PCT || '0.3');  // Max % distance from fast EMA
+  static EMA_TREND_BE_TRIGGER_PCT = parseFloat(process.env.EMA_TREND_BE_TRIGGER_PCT || '0.7');  // Move SL to breakeven at 70% of TP
+  static EMA_TREND_TRAIL_ATR_MULT = parseFloat(process.env.EMA_TREND_TRAIL_ATR_MULT || '1.5');  // Post-breakeven trailing = ATR × 1.5
+  static EMA_TREND_HTF = process.env.EMA_TREND_HTF || 'H4';  // Higher timeframe for trend alignment
+  static EMA_TREND_MIN_SL = parseFloat(process.env.EMA_TREND_MIN_SL || '200');  // Min SL in pips ($2.00)
+  static EMA_TREND_MAX_SL = parseFloat(process.env.EMA_TREND_MAX_SL || '800');  // Max SL in pips ($8.00)
 
   // Multi-Timeframe (MTF) Settings
   // With H1 primary: uses M15 for entry timing (better entries, higher win rate)

@@ -2,7 +2,7 @@
  * Technical Analysis Engine
  * Calculates indicators (EMA, RSI, ADX) and identifies patterns
  */
-import { EMA, RSI, ADX } from 'technicalindicators';
+import { EMA, RSI, ADX, ATR } from 'technicalindicators';
 import Config from './config.js';
 
 class TechnicalAnalysis {
@@ -60,6 +60,27 @@ class TechnicalAnalysis {
     // Pad with nulls to match candles length
     const padding = new Array(candles.length - adxValues.length).fill(null);
     return [...padding, ...adxValues];
+  }
+
+  /**
+   * Calculate ATR (Average True Range) - measures volatility
+   * Returns array of ATR values padded with nulls to match candles length
+   */
+  calculateATR(candles, period = 14) {
+    const highs = candles.map(c => c.high);
+    const lows = candles.map(c => c.low);
+    const closes = candles.map(c => c.close);
+
+    const atrValues = ATR.calculate({
+      period,
+      high: highs,
+      low: lows,
+      close: closes
+    });
+
+    // Pad with nulls to match candles length
+    const padding = new Array(candles.length - atrValues.length).fill(null);
+    return [...padding, ...atrValues];
   }
 
   /**

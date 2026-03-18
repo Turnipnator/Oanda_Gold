@@ -12,6 +12,7 @@ import OandaClient from './oanda_client.js';
 import TechnicalAnalysis from './technical_analysis.js';
 import TripleConfirmationStrategy from './strategy.js';
 import BreakoutADXStrategy from './breakout_adx_strategy.js';
+import EmaTrendStrategy from './ema_trend_strategy.js';
 import RiskManager from './risk_manager.js';
 import GoldTelegramBot from './telegram_bot.js';
 import StrategyTracker from './strategy_tracker.js';
@@ -34,28 +35,31 @@ class GoldTradingBot {
     this.client = new OandaClient(logger);
     this.ta = new TechnicalAnalysis(logger);
 
-    // Initialize BOTH strategies for comparison
+    // Initialize strategies
     this.tripleStrategy = new TripleConfirmationStrategy(logger, this.ta);
     this.breakoutStrategy = new BreakoutADXStrategy(logger, this.ta);
+    this.emaTrendStrategy = new EmaTrendStrategy(logger, this.ta);
 
     // Determine which strategy trades live (from config)
-    // Options: 'breakout_adx' (default/recommended) or 'triple_confirmation'
-    const liveStrategyName = Config.STRATEGY_TYPE === 'triple_confirmation'
-      ? 'Triple Confirmation'
-      : 'Breakout + ADX';
-
-    this.liveStrategy = Config.STRATEGY_TYPE === 'triple_confirmation'
-      ? this.tripleStrategy
-      : this.breakoutStrategy;
+    const strategyMap = {
+      'triple_confirmation': { strategy: this.tripleStrategy, name: 'Triple Confirmation' },
+      'breakout_adx': { strategy: this.breakoutStrategy, name: 'Breakout + ADX' },
+      'ema_trend': { strategy: this.emaTrendStrategy, name: 'EMA Trend' },
+    };
+    const selected = strategyMap[Config.STRATEGY_TYPE] || strategyMap['breakout_adx'];
+    const liveStrategyName = selected.name;
+    this.liveStrategy = selected.strategy;
 
     // Initialize strategy tracker
     this.tracker = new StrategyTracker();
     this.tracker.registerStrategy('Breakout + ADX', liveStrategyName === 'Breakout + ADX');
     this.tracker.registerStrategy('Breakout + ADX (Realtime MTF)', liveStrategyName === 'Breakout + ADX');
     this.tracker.registerStrategy('Triple Confirmation', liveStrategyName === 'Triple Confirmation');
+    this.tracker.registerStrategy('EMA Trend', liveStrategyName === 'EMA Trend');
 
     logger.info(`🟢 LIVE Strategy: ${liveStrategyName}`);
-    logger.info(`📝 HYPOTHETICAL Strategy: ${liveStrategyName === 'Breakout + ADX' ? 'Triple Confirmation' : 'Breakout + ADX'}`);
+    const otherStrategies = Object.values(strategyMap).filter(s => s.name !== liveStrategyName).map(s => s.name);
+    logger.info(`📝 HYPOTHETICAL: ${otherStrategies.join(', ')}`);
 
     this.riskManager = new RiskManager(logger, this.client);
 
@@ -606,7 +610,7 @@ class GoldTradingBot {
         return;
       }
 
-      // Fetch H1 candles for MTF entry timing (if enabled)
+      // Fetch MTF candles for breakout entry timing (if enabled)
       let h1Candles = null;
       if (Config.ENABLE_MTF) {
         const allH1Candles = await this.client.getCandles(
@@ -615,31 +619,53 @@ class GoldTradingBot {
           100
         );
         h1Candles = allH1Candles.filter(c => c.complete);
-        logger.debug(`📊 H1 Candles: ${allH1Candles.length} total, ${h1Candles.length} complete`);
+        logger.debug(`📊 MTF Candles: ${allH1Candles.length} total, ${h1Candles.length} complete`);
+      }
+
+      // Fetch HTF candles for EMA Trend strategy alignment
+      let htfCandles = null;
+      if (Config.STRATEGY_TYPE === 'ema_trend') {
+        const allHTFCandles = await this.client.getCandles(
+          Config.TRADING_SYMBOL,
+          Config.EMA_TREND_HTF,
+          100
+        );
+        htfCandles = allHTFCandles.filter(c => c.complete);
+        logger.debug(`📊 HTF (${Config.EMA_TREND_HTF}) Candles: ${allHTFCandles.length} total, ${htfCandles.length} complete`);
       }
 
       // Perform technical analysis (uses completed candles for accurate indicators)
       const analysis = this.ta.analyze(candles);
       this.ta.logAnalysis(analysis);
 
-      // Evaluate BOTH strategies (pass H1 candles to breakout strategy for MTF)
+      // Evaluate all strategies
       const tripleSetup = this.tripleStrategy.evaluateSetup(analysis);
       const breakoutSetup = this.breakoutStrategy.evaluateSetup(analysis, candles, h1Candles);
+      const emaTrendSetup = this.emaTrendStrategy.evaluateSetup(analysis, candles, htfCandles);
+
+      const setupMap = {
+        'Breakout + ADX': breakoutSetup,
+        'Triple Confirmation': tripleSetup,
+        'EMA Trend': emaTrendSetup,
+      };
 
       logger.info('');
       logger.info('─'.repeat(70));
       logger.info('📊 STRATEGY EVALUATION RESULTS:');
       logger.info('─'.repeat(70));
       logger.info(`🟢 Breakout + ADX: ${breakoutSetup.signal || 'NO SIGNAL'} (${breakoutSetup.confidence}%) - ${breakoutSetup.reason}`);
+      logger.info(`📊 EMA Trend: ${emaTrendSetup.signal || 'NO SIGNAL'} (${(emaTrendSetup.confidence * 100).toFixed(0)}%) - ${emaTrendSetup.reason}`);
       logger.info(`📝 Triple Confirmation: ${tripleSetup.signal || 'NO SIGNAL'} (${tripleSetup.confidence}%) - ${tripleSetup.reason}`);
       logger.info('─'.repeat(70));
       logger.info('');
 
       // Determine which setup to use for live trading
-      const liveSetup = this.liveStrategy === this.breakoutStrategy ? breakoutSetup : tripleSetup;
-      const hypotheticalSetup = this.liveStrategy === this.breakoutStrategy ? tripleSetup : breakoutSetup;
-      const liveStrategyName = this.liveStrategy === this.breakoutStrategy ? 'Breakout + ADX' : 'Triple Confirmation';
-      const hypotheticalStrategyName = this.liveStrategy === this.breakoutStrategy ? 'Triple Confirmation' : 'Breakout + ADX';
+      const liveStrategyName = Config.STRATEGY_TYPE === 'ema_trend' ? 'EMA Trend'
+        : Config.STRATEGY_TYPE === 'triple_confirmation' ? 'Triple Confirmation'
+        : 'Breakout + ADX';
+      const liveSetup = setupMap[liveStrategyName];
+      const hypotheticalStrategyName = Object.keys(setupMap).find(k => k !== liveStrategyName) || 'Triple Confirmation';
+      const hypotheticalSetup = setupMap[hypotheticalStrategyName];
 
       // Check if live strategy has a signal
       if (!liveSetup.signal) {
@@ -877,11 +903,18 @@ class GoldTradingBot {
 
       // Recalculate SL based on actual fill price (not theoretical entry price)
       // The calculated SL may be wrong if fill price differs from analysis price
-      // Breakout trades use wider SL to survive post-breakout volatility
       const isLong = signal === 'LONG';
+      const isEmaTrend = strategyName?.includes('EMA Trend');
       const isBreakoutTrade = strategyName?.includes('Breakout');
-      const stopPips = isBreakoutTrade ? Config.BREAKOUT_STOP_LOSS_PIPS : Config.STOP_LOSS_PIPS;
-      const stopDistance = Config.pipsToPrice(stopPips);
+      let stopDistance;
+      if (isEmaTrend) {
+        // EMA Trend uses ATR-based stops — recalculate from the strategy's stored ATR
+        const atrSL = (this.emaTrendStrategy.lastATR || 5.0) * Config.EMA_TREND_ATR_SL_MULT;
+        stopDistance = Math.max(Config.pipsToPrice(Config.EMA_TREND_MIN_SL), Math.min(Config.pipsToPrice(Config.EMA_TREND_MAX_SL), atrSL));
+      } else {
+        const stopPips = isBreakoutTrade ? Config.BREAKOUT_STOP_LOSS_PIPS : Config.STOP_LOSS_PIPS;
+        stopDistance = Config.pipsToPrice(stopPips);
+      }
       const correctStopLoss = isLong
         ? order.price - stopDistance
         : order.price + stopDistance;
@@ -899,7 +932,8 @@ class GoldTradingBot {
       // Recalculate TP based on actual fill price (same reason as SL above)
       // Without this, slippage makes TP closer than intended — e.g. 0.75:1 instead of 1:1
       if (!Config.TRAILING_ONLY && !Config.ENABLE_STAGED_TP) {
-        const tpDistance = stopDistance * Config.TAKE_PROFIT_RR;
+        const tpRR = isEmaTrend ? Config.EMA_TREND_TP_RR : Config.TAKE_PROFIT_RR;
+        const tpDistance = stopDistance * tpRR;
         const correctTP = isLong
           ? order.price + tpDistance
           : order.price - tpDistance;
@@ -934,7 +968,8 @@ class GoldTradingBot {
       logger.info('');
 
       // Track position
-      this.activePositions.set(order.tradeId, {
+      // Build position tracking object
+      const positionData = {
         tradeId: order.tradeId,
         symbol: Config.TRADING_SYMBOL,
         signal,
@@ -947,9 +982,23 @@ class GoldTradingBot {
         reason,
         openTime: new Date(),
         tp1Hit: false,
-        bestPrice: order.price, // Track best price for trailing stops
-        currentStopLoss: levels.stopLoss
-      });
+        bestPrice: order.price,
+        currentStopLoss: levels.stopLoss,
+        // EMA Trend breakeven fields
+        breakevenTriggered: false,
+        breakevenTriggerDistance: null,
+        atrTrailDistance: null,
+      };
+
+      // EMA Trend: store breakeven and ATR trailing parameters
+      if (strategyName?.includes('EMA Trend')) {
+        const tpDist = Math.abs(levels.takeProfit1 - order.price);
+        positionData.breakevenTriggerDistance = tpDist * Config.EMA_TREND_BE_TRIGGER_PCT;
+        positionData.atrTrailDistance = (this.emaTrendStrategy.lastATR || 5.0) * Config.EMA_TREND_TRAIL_ATR_MULT;
+        logger.info(`📊 Breakeven at $${positionData.breakevenTriggerDistance.toFixed(2)} profit, then trail at $${positionData.atrTrailDistance.toFixed(2)}`);
+      }
+
+      this.activePositions.set(order.tradeId, positionData);
 
       // Persist position to file
       this.savePositions();
@@ -1099,15 +1148,41 @@ class GoldTradingBot {
           }
         }
 
+        // EMA Trend breakeven logic: move SL to entry when profit >= X% of TP distance
+        if (tracked.strategyName?.includes('EMA Trend') && !tracked.breakevenTriggered && tracked.breakevenTriggerDistance) {
+          const currentPrice = await this.client.getPrice(trade.instrument);
+          const price = currentPrice.mid;
+          const isLong = trade.units > 0;
+          const profitMove = isLong ? price - tracked.entryPrice : tracked.entryPrice - price;
+
+          if (profitMove >= tracked.breakevenTriggerDistance) {
+            try {
+              await this.client.modifyTrade(trade.tradeId, tracked.entryPrice, null);
+              tracked.breakevenTriggered = true;
+              tracked.currentStopLoss = tracked.entryPrice;
+              this.savePositions();
+              logger.info(`🔒 BREAKEVEN: ${trade.tradeId} SL moved to entry $${tracked.entryPrice.toFixed(2)} (profit $${profitMove.toFixed(2)} >= trigger $${tracked.breakevenTriggerDistance.toFixed(2)})`);
+            } catch (error) {
+              logger.error(`Failed to move SL to breakeven: ${error.message}`);
+            }
+          }
+        }
+
         // Trailing stop logic - activates when price has moved enough in our favor:
         // 1. After TP1 is hit (staged TP mode), OR
         // 2. After price moves by TRAILING_ACTIVATION_PIPS in our favor
+        // 3. EMA Trend: After breakeven triggered, use ATR-based trail distance
         // This prevents trailing from triggering too early and closing at breakeven
         if (Config.ENABLE_TRAILING_STOP) {
           const currentPrice = await this.client.getPrice(trade.instrument);
           const price = currentPrice.mid;
           const isLong = trade.units > 0;
-          const trailDistance = Config.pipsToPrice(Config.TRAILING_STOP_DISTANCE_PIPS);
+
+          // EMA Trend uses ATR-based trail after breakeven; others use fixed distance
+          const isEmaTrend = tracked.strategyName?.includes('EMA Trend');
+          const trailDistance = (isEmaTrend && tracked.breakevenTriggered && tracked.atrTrailDistance)
+            ? tracked.atrTrailDistance
+            : Config.pipsToPrice(Config.TRAILING_STOP_DISTANCE_PIPS);
 
           // Calculate how much price has moved in our favor
           const profitMove = isLong
@@ -1116,12 +1191,14 @@ class GoldTradingBot {
 
           // Activate trailing when:
           // - TP1 already hit (staged TP mode), OR
+          // - EMA Trend: breakeven triggered (trail immediately after BE), OR
           // - Price moved in our favor by activation threshold
           // Breakout trades use wider activation ($3.50) to let the move establish
           const isBreakoutTrade = tracked.strategyName?.includes('Breakout');
+          const emaTrendTrailReady = isEmaTrend && tracked.breakevenTriggered;
           const activationPips = isBreakoutTrade ? Config.BREAKOUT_TRAILING_ACTIVATION_PIPS : Config.TRAILING_ACTIVATION_PIPS;
           const activationDistance = Config.pipsToPrice(activationPips);
-          const shouldTrail = tracked.tp1Hit || profitMove >= activationDistance;
+          const shouldTrail = tracked.tp1Hit || emaTrendTrailReady || profitMove >= activationDistance;
 
           if (shouldTrail) {
             // Update best price if price moved favorably
