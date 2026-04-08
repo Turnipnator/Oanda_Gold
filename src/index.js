@@ -313,6 +313,10 @@ class GoldTradingBot {
 
             // Update risk manager
             this.riskManager.recordTrade(pnl);
+
+            // Update strategy tracker
+            const trackerCloseId = tracked?.trackerTradeId || `LIVE_${tradeId}`;
+            this.tracker.closeTrade(tracked?.strategyName || 'Unknown', trackerCloseId, exitPrice, reason);
           }
         } catch (error) {
           logger.warn(`Could not fetch close details for trade ${tradeId}: ${error.message}`);
@@ -1003,8 +1007,8 @@ class GoldTradingBot {
       // Persist position to file
       this.savePositions();
 
-      // Record in strategy tracker
-      this.tracker.recordSignal(
+      // Record in strategy tracker and store tracker ID for closure matching
+      const trackerTrade = this.tracker.recordSignal(
         strategyName,
         signal,
         order.price,
@@ -1015,6 +1019,10 @@ class GoldTradingBot {
         reason,
         confidence
       );
+      if (trackerTrade) {
+        positionData.trackerTradeId = trackerTrade.id;
+        this.savePositions();
+      }
 
       // Notify via Telegram
       if (this.telegramBot) {
@@ -1338,8 +1346,9 @@ class GoldTradingBot {
             }
           }
 
-          // Update strategy tracker
-          this.tracker.closeTrade(tracked.strategyName, `LIVE_${tradeId}`, exitPrice || entryPrice, reason);
+          // Update strategy tracker (use stored tracker ID, fall back to LIVE_ prefix for legacy)
+          const trackerCloseId = tracked.trackerTradeId || `LIVE_${tradeId}`;
+          this.tracker.closeTrade(tracked.strategyName, trackerCloseId, exitPrice || entryPrice, reason);
         } else {
           logger.warn(`⚠️ Could not fetch P&L for trade ${tradeId} - cooldown still set`);
 

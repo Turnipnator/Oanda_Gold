@@ -78,7 +78,7 @@ class Config {
   static EMA_TREND_ATR_PERIOD = parseInt(process.env.EMA_TREND_ATR_PERIOD || '14');
   static EMA_TREND_ATR_SL_MULT = parseFloat(process.env.EMA_TREND_ATR_SL_MULT || '1.5');  // ATR multiplier for SL (lower than IG's 2.5 because H1 ATR >> 5m ATR)
   static EMA_TREND_TP_RR = parseFloat(process.env.EMA_TREND_TP_RR || '2.0');  // 2:1 R:R
-  static EMA_TREND_ADX_MIN = parseFloat(process.env.EMA_TREND_ADX_MIN || '30');
+  static EMA_TREND_ADX_MIN = parseFloat(process.env.EMA_TREND_ADX_MIN || '25');
   static EMA_TREND_RSI_OB = parseFloat(process.env.EMA_TREND_RSI_OB || '85');  // Overbought (wide — Gold trends push RSI high)
   static EMA_TREND_RSI_OS = parseFloat(process.env.EMA_TREND_RSI_OS || '15');  // Oversold
   static EMA_TREND_RSI_BUY_MAX = parseFloat(process.env.EMA_TREND_RSI_BUY_MAX || '60');
