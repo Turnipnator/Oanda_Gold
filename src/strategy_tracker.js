@@ -100,26 +100,32 @@ class StrategyTracker {
    * Register a strategy for tracking
    */
   registerStrategy(name, isLive = false) {
-    this.strategies.set(name, {
-      name,
-      isLive,
-      trades: [],
-      totalTrades: 0,
-      winningTrades: 0,
-      losingTrades: 0,
-      totalPnL: 0,
-      largestWin: 0,
-      largestLoss: 0,
-      currentDrawdown: 0,
-      maxDrawdown: 0,
-      openPositions: []
-    });
+    // Preserve existing data if strategy was already loaded from disk
+    const existing = this.strategies.get(name);
+    if (existing) {
+      existing.isLive = isLive;
+      logger.info(`📊 Restored strategy: ${name} ${isLive ? '(LIVE)' : '(HYPOTHETICAL)'} - ${existing.totalTrades} trades, P&L: $${existing.totalPnL.toFixed(2)}`);
+    } else {
+      this.strategies.set(name, {
+        name,
+        isLive,
+        trades: [],
+        totalTrades: 0,
+        winningTrades: 0,
+        losingTrades: 0,
+        totalPnL: 0,
+        largestWin: 0,
+        largestLoss: 0,
+        currentDrawdown: 0,
+        maxDrawdown: 0,
+        openPositions: []
+      });
+      logger.info(`📊 Registered strategy: ${name} ${isLive ? '(LIVE)' : '(HYPOTHETICAL)'}`);
+    }
 
     if (isLive) {
       this.liveStrategy = name;
     }
-
-    logger.info(`📊 Registered strategy: ${name} ${isLive ? '(LIVE)' : '(HYPOTHETICAL)'}`);
 
     // Persist changes
     this.save();
