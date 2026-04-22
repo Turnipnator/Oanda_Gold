@@ -639,7 +639,7 @@ class GoldTelegramBot {
       `🤖 Strategy: ${strategyEscaped}\n` +
       `Symbol: ${symbolEscaped}\n` +
       `Side: ${side}\n` +
-      `Confidence: ${confidence}%\n` +
+      `Confidence: ${(confidence * 100).toFixed(0)}%\n` +
       `Entry: $${entryPrice.toFixed(2)}\n` +
       `Size: ${size} units\n` +
       `Stop Loss: $${stopLoss.toFixed(2)}\n` +
@@ -652,13 +652,14 @@ class GoldTelegramBot {
   /**
    * Trade closed notification
    */
-  async notifyTradeClosed(symbol, entryPrice, exitPrice, pnl, pnlPct, reason, strategyName) {
+  async notifyTradeClosed(symbol, entryPrice, exitPrice, pnl, rMultiple, reason, strategyName) {
     const emoji = pnl >= 0 ? '🎉' : '😔';
     const pnlSign = pnl >= 0 ? '+' : '';
-    const pctSign = pnlPct >= 0 ? '+' : '';
+    const rSign = rMultiple >= 0 ? '+' : '';
     // Escape underscores for Markdown
     const symbolEscaped = symbol.replace(/_/g, '\\_');
     const strategyEscaped = strategyName ? strategyName.replace(/_/g, '\\_') : 'Unknown';
+    const rDisplay = isFinite(rMultiple) ? `${rSign}${rMultiple.toFixed(2)}R` : 'N/A';
 
     const message =
       `${emoji} *LIVE TRADE CLOSED*\n\n` +
@@ -667,7 +668,7 @@ class GoldTelegramBot {
       `Reason: ${reason}\n` +
       `Entry: $${entryPrice.toFixed(2)}\n` +
       `Exit: $${exitPrice.toFixed(2)}\n` +
-      `P&L: ${pnlSign}$${Math.abs(pnl).toFixed(2)} (${pctSign}${pnlPct.toFixed(2)}%)`;
+      `P&L: ${pnlSign}$${Math.abs(pnl).toFixed(2)} (${rDisplay})`;
 
     await this.sendNotification(message);
   }

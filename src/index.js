@@ -279,7 +279,11 @@ class GoldTradingBot {
             const entryPrice = parseFloat(trade.price);
             const exitPrice = parseFloat(trade.averageClosePrice || entryPrice);
             const pnl = parseFloat(trade.realizedPL || 0);
-            const pnlPct = (pnl / (entryPrice * Math.abs(parseFloat(trade.initialUnits)))) * 100;
+            const initialSL = trade.stopLossOrder ? parseFloat(trade.stopLossOrder.price) : (tracked?.stopLoss || 0);
+            const riskPerUnit = initialSL ? Math.abs(entryPrice - initialSL) : 0;
+            const units = Math.abs(parseFloat(trade.initialUnits));
+            const riskAmount = riskPerUnit * units;
+            const rMultiple = riskAmount > 0 ? pnl / riskAmount : 0;
             const reason = trade.stopLossOrderID ? 'STOP_LOSS' : (trade.takeProfitOrderID ? 'TAKE_PROFIT' : 'Unknown');
 
             logger.info(`💰 Closed trade ${tradeId}: ${pnl >= 0 ? '+' : ''}£${pnl.toFixed(2)} (${reason})`);
@@ -302,7 +306,7 @@ class GoldTradingBot {
                   entryPrice,
                   exitPrice,
                   pnl,
-                  pnlPct,
+                  rMultiple,
                   reason,
                   tracked?.strategyName || 'Unknown'
                 );
@@ -1285,45 +1289,48 @@ class GoldTradingBot {
         const entryPrice = tracked.entryPrice;
 
         try {
-          // Method 1: Direct trade lookup
+          // Method 1: Direct trade lookup (gets P&L and exit price)
           const response = await this.client.makeRequest('GET', `/v3/accounts/${this.client.accountId}/trades/${tradeId}`);
           if (response.trade && response.trade.state === 'CLOSED') {
             exitPrice = parseFloat(response.trade.averageClosePrice || entryPrice);
             pnl = parseFloat(response.trade.realizedPL || 0);
-            reason = response.trade.closeReason || 'Unknown';
           }
         } catch (error) {
           logger.debug(`Trade lookup failed for ${tradeId}: ${error.message}`);
         }
 
-        // Method 2: Search recent transactions for the close fill
-        if (pnl === null) {
-          try {
-            const fromId = parseInt(tradeId);
-            const toId = fromId + 20; // Close transaction is usually within a few IDs
-            const txResponse = await this.client.makeRequest('GET',
-              `/v3/accounts/${this.client.accountId}/transactions/idrange?from=${fromId}&to=${toId}`);
-            if (txResponse.transactions) {
-              const closeFill = txResponse.transactions.find(tx =>
-                tx.type === 'ORDER_FILL' && tx.tradesClosed &&
-                tx.tradesClosed.some(tc => tc.tradeID === String(tradeId))
-              );
-              if (closeFill) {
+        // Method 2: Search recent transactions for the close fill (fills in reason; also fallback for P&L)
+        try {
+          const fromId = parseInt(tradeId);
+          const toId = fromId + 20; // Close transaction is usually within a few IDs
+          const txResponse = await this.client.makeRequest('GET',
+            `/v3/accounts/${this.client.accountId}/transactions/idrange?from=${fromId}&to=${toId}`);
+          if (txResponse.transactions) {
+            const closeFill = txResponse.transactions.find(tx =>
+              tx.type === 'ORDER_FILL' && tx.tradesClosed &&
+              tx.tradesClosed.some(tc => tc.tradeID === String(tradeId))
+            );
+            if (closeFill) {
+              reason = closeFill.reason || 'Unknown';
+              if (pnl === null) {
                 const closedTrade = closeFill.tradesClosed.find(tc => tc.tradeID === String(tradeId));
                 pnl = parseFloat(closedTrade.realizedPL || 0);
                 exitPrice = parseFloat(closedTrade.price || entryPrice);
-                reason = closeFill.reason || 'Unknown';
               }
             }
-          } catch (error) {
-            logger.debug(`Transaction lookup failed for ${tradeId}: ${error.message}`);
           }
+        } catch (error) {
+          logger.debug(`Transaction lookup failed for ${tradeId}: ${error.message}`);
         }
 
         // Log P&L (use what we have, even if incomplete)
         if (pnl !== null) {
-          const pnlPct = entryPrice ? (pnl / (entryPrice * Math.abs(tracked.units || 1))) * 100 : 0;
-          logger.info(`💰 P&L: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%)`);
+          const units = Math.abs(tracked.units || 1);
+          const riskPerUnit = tracked.stopLoss ? Math.abs(entryPrice - tracked.stopLoss) : 0;
+          const riskAmount = riskPerUnit * units;
+          const rMultiple = riskAmount > 0 ? pnl / riskAmount : 0;
+          const rSign = rMultiple >= 0 ? '+' : '';
+          logger.info(`💰 P&L: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} (${rSign}${rMultiple.toFixed(2)}R)`);
           logger.info(`Reason: ${reason}`);
 
           // Update risk manager
@@ -1337,7 +1344,7 @@ class GoldTradingBot {
                 entryPrice,
                 exitPrice || entryPrice,
                 pnl,
-                pnlPct,
+                rMultiple,
                 reason,
                 tracked.strategyName
               );
