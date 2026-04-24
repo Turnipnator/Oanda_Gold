@@ -84,7 +84,7 @@ class Config {
   static EMA_TREND_RSI_BUY_MAX = parseFloat(process.env.EMA_TREND_RSI_BUY_MAX || '60');
   static EMA_TREND_RSI_SELL_MIN = parseFloat(process.env.EMA_TREND_RSI_SELL_MIN || '40');
   static EMA_TREND_PULLBACK_PCT = parseFloat(process.env.EMA_TREND_PULLBACK_PCT || '0.3');  // Max % distance from fast EMA
-  static EMA_TREND_BE_TRIGGER_PCT = parseFloat(process.env.EMA_TREND_BE_TRIGGER_PCT || '0.7');  // Move SL to breakeven at 70% of TP
+  static EMA_TREND_BE_TRIGGER_PCT = parseFloat(process.env.EMA_TREND_BE_TRIGGER_PCT || '0.3');  // Move SL to breakeven at 30% of TP (lowered from 0.7 Apr 24 - runners weren't reaching 70%)
   static EMA_TREND_TRAIL_ATR_MULT = parseFloat(process.env.EMA_TREND_TRAIL_ATR_MULT || '1.5');  // Post-breakeven trailing = ATR × 1.5
   static EMA_TREND_HTF = process.env.EMA_TREND_HTF || 'H4';  // Higher timeframe for trend alignment
   static EMA_TREND_MIN_SL = parseFloat(process.env.EMA_TREND_MIN_SL || '200');  // Min SL in pips ($2.00)
