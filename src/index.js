@@ -696,12 +696,26 @@ class GoldTradingBot {
       logger.info(`Reason: ${liveSetup.reason}`);
       logger.info('');
 
-      // Check if we already have a position in this instrument
+      // Check if we already have a position in this instrument.
+      // Use both Oanda's openTrades and our local activePositions cache to close a race window:
+      // if a trade closed on Oanda (e.g. trailing SL fired) between monitor cycles, Oanda already
+      // shows no open trade, but the monitor hasn't yet processed the closure or set cooldown.
       const existingTrades = await this.client.getOpenTrades();
-      const hasPosition = existingTrades.some(t => t.instrument === Config.TRADING_SYMBOL);
+      const hasOandaPosition = existingTrades.some(t => t.instrument === Config.TRADING_SYMBOL);
+      const hasLocalPosition = Array.from(this.activePositions.values())
+        .some(p => p.symbol === Config.TRADING_SYMBOL);
 
-      if (hasPosition) {
+      if (hasOandaPosition) {
         logger.info('❌ Already have open position in XAU_USD - skipping');
+        return;
+      }
+
+      if (hasLocalPosition) {
+        // Local state has a trade Oanda doesn't — it just closed. Start cooldown now and skip;
+        // the next monitor cycle will reconcile and emit the closure notification.
+        logger.info('⚠️ Local position open but Oanda shows none — trade just closed. Starting cooldown and skipping entry.');
+        this.lastTradeCloseTime = Date.now();
+        this.saveCooldown();
         return;
       }
 
