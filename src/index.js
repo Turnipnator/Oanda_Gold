@@ -768,7 +768,7 @@ class GoldTradingBot {
       }
 
       // Execute LIVE trade
-      await this.executeTrade(liveSetup.signal, units, levels, liveSetup.reason, liveStrategyName, liveSetup.confidence);
+      await this.executeTrade(liveSetup.signal, units, levels, liveSetup.reason, liveStrategyName, liveSetup.confidence, liveSetup);
 
       // Record hypothetical trade if other strategy also signaled
       if (hypotheticalSetup.signal) {
@@ -808,7 +808,7 @@ class GoldTradingBot {
   /**
    * Execute a trade
    */
-  async executeTrade(signal, units, levels, reason, strategyName, confidence) {
+  async executeTrade(signal, units, levels, reason, strategyName, confidence, setup = null) {
     try {
       logger.info('');
       logger.info('🎬 EXECUTING LIVE TRADE...');
@@ -1020,12 +1020,26 @@ class GoldTradingBot {
         logger.info(`📊 Breakeven at $${positionData.breakevenTriggerDistance.toFixed(2)} profit, then trail at $${positionData.atrTrailDistance.toFixed(2)}`);
       }
 
+      // Observational leg filter — stamp the trade so we can correlate with outcome later
+      if (setup && setup.legATR !== undefined) {
+        positionData.legATR = setup.legATR;
+        positionData.legSize = setup.legSize;
+        positionData.legInDirection = setup.legInDirection;
+        positionData.legWouldBlock = setup.legWouldBlock;
+      }
+
       this.activePositions.set(order.tradeId, positionData);
 
       // Persist position to file
       this.savePositions();
 
       // Record in strategy tracker and store tracker ID for closure matching
+      const trackerMetadata = (setup && setup.legATR !== undefined) ? {
+        legATR: setup.legATR,
+        legSize: setup.legSize,
+        legInDirection: setup.legInDirection,
+        legWouldBlock: setup.legWouldBlock,
+      } : null;
       const trackerTrade = this.tracker.recordSignal(
         strategyName,
         signal,
@@ -1035,7 +1049,8 @@ class GoldTradingBot {
         levels.takeProfit2,
         Math.abs(order.units),
         reason,
-        confidence
+        confidence,
+        trackerMetadata
       );
       if (trackerTrade) {
         positionData.trackerTradeId = trackerTrade.id;

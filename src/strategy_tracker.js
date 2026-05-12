@@ -134,7 +134,7 @@ class StrategyTracker {
   /**
    * Record a trade signal (live or hypothetical)
    */
-  recordSignal(strategyName, signal, entryPrice, stopLoss, takeProfit1, takeProfit2, size, reason, confidence) {
+  recordSignal(strategyName, signal, entryPrice, stopLoss, takeProfit1, takeProfit2, size, reason, confidence, metadata = null) {
     const strategy = this.strategies.get(strategyName);
     if (!strategy) {
       logger.error(`Strategy ${strategyName} not registered`);
@@ -157,7 +157,8 @@ class StrategyTracker {
       exitPrice: null,
       pnl: null,
       status: 'open',
-      isLive: strategy.isLive
+      isLive: strategy.isLive,
+      ...(metadata || {})
     };
 
     strategy.openPositions.push(trade);

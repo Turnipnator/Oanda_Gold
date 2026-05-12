@@ -278,12 +278,24 @@ class EmaTrendStrategy {
     this.lastSignalCandleTime = candleTime;
     this.saveState();
 
+    // Observational leg-size filter — recorded for later edge analysis
+    const legInfo = this._calculateLegInfo(completeCandles, atr, signal);
+
     this.logger.info(`📊 EMA Trend: ${signal} setup detected!`);
     this.logger.info(`   EMA ${Config.EMA_TREND_FAST}=$${fast.toFixed(2)}, EMA ${Config.EMA_TREND_MEDIUM}=$${medium.toFixed(2)}, EMA ${Config.EMA_TREND_SLOW}=$${slow.toFixed(2)}`);
     this.logger.info(`   Price: $${price.toFixed(2)}, pullback: ${(priceDistancePct * 100).toFixed(2)}%`);
     this.logger.info(`   ATR(${Config.EMA_TREND_ATR_PERIOD}): $${atr.toFixed(2)} → SL: $${(atr * Config.EMA_TREND_ATR_SL_MULT).toFixed(2)}, TP: $${(atr * Config.EMA_TREND_ATR_SL_MULT * Config.EMA_TREND_TP_RR).toFixed(2)}`);
+    this.logger.info(`   LegFilter (${legInfo.lookback}× H1): legSize=$${legInfo.legSize.toFixed(2)}, legATR=${legInfo.legATR.toFixed(2)}× ${legInfo.legInDirection ? 'in-direction' : 'against-direction'}${legInfo.wouldBlock ? ' ⚠️  WOULD BLOCK at threshold ' + Config.EMA_TREND_LEG_FILTER_THRESHOLD + '×' : ''}`);
 
-    return { signal, reason, confidence: Math.max(0, Math.min(confidence, 1)) };
+    return {
+      signal,
+      reason,
+      confidence: Math.max(0, Math.min(confidence, 1)),
+      legATR: legInfo.legATR,
+      legSize: legInfo.legSize,
+      legInDirection: legInfo.legInDirection,
+      legWouldBlock: legInfo.wouldBlock,
+    };
   }
 
   /**
@@ -316,6 +328,29 @@ class EmaTrendStrategy {
       takeProfit2,
       riskPips: riskPips.toFixed(1)
     };
+  }
+
+  /**
+   * Observational leg-size filter: did the last N H1 candles travel > threshold × ATR
+   * in the trade direction? Recorded with the trade for later edge analysis. Does NOT
+   * block entries — see backtest notes for context.
+   */
+  _calculateLegInfo(candles, atr, signal) {
+    const lookback = Config.EMA_TREND_LEG_FILTER_LOOKBACK;
+    if (!atr || !signal || candles.length < lookback) {
+      return { legATR: 0, legSize: 0, legInDirection: false, wouldBlock: false, lookback };
+    }
+    const recent = candles.slice(-lookback);
+    const highs = recent.map(c => c.high);
+    const lows = recent.map(c => c.low);
+    const legSize = Math.max(...highs) - Math.min(...lows);
+    const firstOpen = recent[0].open;
+    const lastClose = recent[recent.length - 1].close;
+    const moveDir = lastClose < firstOpen ? 'SHORT' : 'LONG';
+    const legInDirection = moveDir === signal;
+    const legATR = legSize / atr;
+    const wouldBlock = legInDirection && legATR > Config.EMA_TREND_LEG_FILTER_THRESHOLD;
+    return { legATR, legSize, legInDirection, wouldBlock, lookback };
   }
 
   /**

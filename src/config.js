@@ -89,6 +89,9 @@ class Config {
   static EMA_TREND_HTF = process.env.EMA_TREND_HTF || 'H4';  // Higher timeframe for trend alignment
   static EMA_TREND_MIN_SL = parseFloat(process.env.EMA_TREND_MIN_SL || '200');  // Min SL in pips ($2.00)
   static EMA_TREND_MAX_SL = parseFloat(process.env.EMA_TREND_MAX_SL || '800');  // Max SL in pips ($8.00)
+  // Leg-size filter (observational only — recorded on every trade for later analysis)
+  static EMA_TREND_LEG_FILTER_LOOKBACK = parseInt(process.env.EMA_TREND_LEG_FILTER_LOOKBACK || '6');  // H1 candles to measure leg
+  static EMA_TREND_LEG_FILTER_THRESHOLD = parseFloat(process.env.EMA_TREND_LEG_FILTER_THRESHOLD || '2.0');  // legATR > this in trade direction → wouldBlock=true
 
   // Multi-Timeframe (MTF) Settings
   // With H1 primary: uses M15 for entry timing (better entries, higher win rate)
