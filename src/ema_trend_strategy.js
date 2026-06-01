@@ -278,8 +278,21 @@ class EmaTrendStrategy {
     this.lastSignalCandleTime = candleTime;
     this.saveState();
 
-    // Observational leg-size filter — recorded for later edge analysis
+    // Leg-size filter — reject entries that chase an exhausted move
     const legInfo = this._calculateLegInfo(completeCandles, atr, signal);
+
+    if (legInfo.wouldBlock && Config.EMA_TREND_LEG_FILTER_ENFORCE) {
+      this.logger.info(`🚫 EMA Trend: ${signal} setup BLOCKED by leg filter — legATR=${legInfo.legATR.toFixed(2)}× in-direction (> ${Config.EMA_TREND_LEG_FILTER_THRESHOLD}×, leg $${legInfo.legSize.toFixed(2)} over ${legInfo.lookback}× H1). Chasing an exhausted move; skipping.`);
+      return {
+        signal: null,
+        reason: `Leg filter: chasing exhausted move (legATR ${legInfo.legATR.toFixed(2)}× > ${Config.EMA_TREND_LEG_FILTER_THRESHOLD}×)`,
+        confidence: 0,
+        legATR: legInfo.legATR,
+        legSize: legInfo.legSize,
+        legInDirection: legInfo.legInDirection,
+        legWouldBlock: legInfo.wouldBlock,
+      };
+    }
 
     this.logger.info(`📊 EMA Trend: ${signal} setup detected!`);
     this.logger.info(`   EMA ${Config.EMA_TREND_FAST}=$${fast.toFixed(2)}, EMA ${Config.EMA_TREND_MEDIUM}=$${medium.toFixed(2)}, EMA ${Config.EMA_TREND_SLOW}=$${slow.toFixed(2)}`);
@@ -331,9 +344,10 @@ class EmaTrendStrategy {
   }
 
   /**
-   * Observational leg-size filter: did the last N H1 candles travel > threshold × ATR
-   * in the trade direction? Recorded with the trade for later edge analysis. Does NOT
-   * block entries — see backtest notes for context.
+   * Leg-size filter: did the last N H1 candles travel > threshold × ATR in the trade
+   * direction? If so the move is exhausted and the entry is chasing it. When
+   * EMA_TREND_LEG_FILTER_ENFORCE is true (default), wouldBlock entries are rejected;
+   * otherwise it is recorded observationally. legATR is also persisted on every trade.
    */
   _calculateLegInfo(candles, atr, signal) {
     const lookback = Config.EMA_TREND_LEG_FILTER_LOOKBACK;

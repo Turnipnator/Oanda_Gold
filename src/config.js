@@ -89,9 +89,14 @@ class Config {
   static EMA_TREND_HTF = process.env.EMA_TREND_HTF || 'H4';  // Higher timeframe for trend alignment
   static EMA_TREND_MIN_SL = parseFloat(process.env.EMA_TREND_MIN_SL || '200');  // Min SL in pips ($2.00)
   static EMA_TREND_MAX_SL = parseFloat(process.env.EMA_TREND_MAX_SL || '800');  // Max SL in pips ($8.00)
-  // Leg-size filter (observational only — recorded on every trade for later analysis)
+  // Leg-size filter — blocks entries that chase an exhausted move (price already ran
+  // > THRESHOLD × ATR in the trade direction over the last LOOKBACK H1 candles).
+  // Enforced Jun 1 2026: backtest over 22 EMA Trend trades showed enforcing at 2.0×
+  // dodged all four −$800 losers (+$1,917 net) at the cost of 6 small forgone winners.
+  // Set EMA_TREND_LEG_FILTER_ENFORCE=false to revert to observational (log-only).
   static EMA_TREND_LEG_FILTER_LOOKBACK = parseInt(process.env.EMA_TREND_LEG_FILTER_LOOKBACK || '6');  // H1 candles to measure leg
-  static EMA_TREND_LEG_FILTER_THRESHOLD = parseFloat(process.env.EMA_TREND_LEG_FILTER_THRESHOLD || '2.0');  // legATR > this in trade direction → wouldBlock=true
+  static EMA_TREND_LEG_FILTER_THRESHOLD = parseFloat(process.env.EMA_TREND_LEG_FILTER_THRESHOLD || '2.0');  // legATR > this in trade direction → block
+  static EMA_TREND_LEG_FILTER_ENFORCE = process.env.EMA_TREND_LEG_FILTER_ENFORCE !== 'false';  // true = reject chasing entries; false = log only
 
   // Multi-Timeframe (MTF) Settings
   // With H1 primary: uses M15 for entry timing (better entries, higher win rate)
