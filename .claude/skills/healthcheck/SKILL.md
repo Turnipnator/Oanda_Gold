@@ -119,6 +119,17 @@ is the source of truth for what's actually running.
 - Any requote or rejection issues
 
 ## 8. STRATEGY EDGE ASSESSMENT
+
+> ⏰ **POST-CHANGE VALIDATION TRIGGER (set Jun 1 2026).** Baseline EMA Trend trade count was
+> **22** when three changes shipped (leg filter enforced @2.0×, breakeven monotonic-trail fix,
+> pre-BE trail $0.75→$1.50). **When the count reaches ~37–42 (15–20 new trades), RUN THE
+> VALIDATION REVIEW and report it prominently:**
+> - Split trades at the Jun 1 baseline (id/time) → compare PF, win rate, avg win, payoff before vs after.
+> - **Leg filter:** any trade that fired despite a `WOULD BLOCK` log? Compare blocked-vs-allowed P&L (`legWouldBlock`). Is it still removing losers not winners?
+> - **BE fix:** are the $0 give-back-to-breakeven scratches gone?
+> - **Trail $1.50:** did avg win rise vs the old ~$212? What's the `TAKE_PROFIT`-hit rate now?
+> - **Verdict:** did PF move off 1.11? If the three changes held → this is the green light to revisit risk sizing (the MIN_POSITION_SIZE floor / 0.5%-vs-0.9%) and prep go-live. If not → diagnose before real money.
+
 Use the per-strategy tracker (NOT just trading_stats.json — that blends all strategies and
 includes pre-bot history). Pull the live strategy's own trades and compute the edge:
 ```bash
