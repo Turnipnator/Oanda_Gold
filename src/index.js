@@ -1016,8 +1016,15 @@ class GoldTradingBot {
       if (strategyName?.includes('EMA Trend')) {
         const tpDist = Math.abs(levels.takeProfit1 - order.price);
         positionData.breakevenTriggerDistance = tpDist * Config.EMA_TREND_BE_TRIGGER_PCT;
-        positionData.atrTrailDistance = (this.emaTrendStrategy.lastATR || 5.0) * Config.EMA_TREND_TRAIL_ATR_MULT;
-        logger.info(`📊 Breakeven at $${positionData.breakevenTriggerDistance.toFixed(2)} profit, then trail at $${positionData.atrTrailDistance.toFixed(2)}`);
+        // Cap the post-breakeven trail to the same bounds as the stop. Uncapped ATR×1.5
+        // on H1 (~$25) is wider than the whole 2R target, so the trail never re-engages
+        // and the trade strands at breakeven. The SL itself is capped at $2–$8; the trail
+        // must be too, or it's not a trail.
+        const rawTrail = (this.emaTrendStrategy.lastATR || 5.0) * Config.EMA_TREND_TRAIL_ATR_MULT;
+        const minTrail = Config.pipsToPrice(Config.EMA_TREND_MIN_SL);
+        const maxTrail = Config.pipsToPrice(Config.EMA_TREND_MAX_SL);
+        positionData.atrTrailDistance = Math.max(minTrail, Math.min(maxTrail, rawTrail));
+        logger.info(`📊 Breakeven at $${positionData.breakevenTriggerDistance.toFixed(2)} profit, then trail at $${positionData.atrTrailDistance.toFixed(2)} (raw ATR trail $${rawTrail.toFixed(2)} capped to SL bounds)`);
       }
 
       // Observational leg filter — stamp the trade so we can correlate with outcome later
@@ -1189,7 +1196,10 @@ class GoldTradingBot {
           }
         }
 
-        // EMA Trend breakeven logic: move SL to entry when profit >= X% of TP distance
+        // EMA Trend breakeven: once profit >= X% of TP, guarantee the stop is at least
+        // at entry — but NEVER move it backward. The pre-breakeven trail may have already
+        // locked profit beyond entry; resetting to entry would hand that profit back
+        // (this was the "scratch at $0" bug). Move to entry only if it tightens the stop.
         if (tracked.strategyName?.includes('EMA Trend') && !tracked.breakevenTriggered && tracked.breakevenTriggerDistance) {
           const currentPrice = await this.client.getPrice(trade.instrument);
           const price = currentPrice.mid;
@@ -1197,15 +1207,26 @@ class GoldTradingBot {
           const profitMove = isLong ? price - tracked.entryPrice : tracked.entryPrice - price;
 
           if (profitMove >= tracked.breakevenTriggerDistance) {
-            try {
-              await this.client.modifyTrade(trade.tradeId, tracked.entryPrice, null);
-              tracked.breakevenTriggered = true;
-              tracked.currentStopLoss = tracked.entryPrice;
-              this.savePositions();
-              logger.info(`🔒 BREAKEVEN: ${trade.tradeId} SL moved to entry $${tracked.entryPrice.toFixed(2)} (profit $${profitMove.toFixed(2)} >= trigger $${tracked.breakevenTriggerDistance.toFixed(2)})`);
-            } catch (error) {
-              logger.error(`Failed to move SL to breakeven: ${error.message}`);
+            // Enable post-breakeven trailing mode regardless of whether we move the stop.
+            tracked.breakevenTriggered = true;
+            const beImproves = isLong
+              ? tracked.entryPrice > tracked.currentStopLoss
+              : tracked.entryPrice < tracked.currentStopLoss;
+            if (beImproves) {
+              try {
+                await this.client.modifyTrade(trade.tradeId, tracked.entryPrice, null);
+                tracked.currentStopLoss = tracked.entryPrice;
+                logger.info(`🔒 BREAKEVEN: ${trade.tradeId} SL moved to entry $${tracked.entryPrice.toFixed(2)} (profit $${profitMove.toFixed(2)} >= trigger $${tracked.breakevenTriggerDistance.toFixed(2)})`);
+              } catch (error) {
+                logger.error(`Failed to move SL to breakeven: ${error.message}`);
+              }
+            } else {
+              const locked = isLong
+                ? tracked.currentStopLoss - tracked.entryPrice
+                : tracked.entryPrice - tracked.currentStopLoss;
+              logger.info(`🔒 BREAKEVEN reached for ${trade.tradeId} — trail already locks $${locked.toFixed(2)}; stop left at $${tracked.currentStopLoss.toFixed(2)} (not loosened to entry)`);
             }
+            this.savePositions();
           }
         }
 
