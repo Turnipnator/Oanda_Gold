@@ -127,10 +127,15 @@ node -e 'const d=JSON.parse(require("fs").readFileSync("/tmp/tracker.json"));con
 ```
 
 - Win rate, profit factor, avg win vs avg loss (payoff ratio).
-- **ATR-SL CAP SANITY CHECK (important):** compare `lastATR` (in ema_trend_state.json) × 1.5
-  against the $8 `EMA_TREND_MAX_SL` cap. If `ATR×1.5 > $8`, EVERY stop is pinned at the cap and
-  the "adaptive" ATR stop is really a fixed $8 stop — the strategy isn't getting the volatility
-  scaling its backtest assumed. (Gold H1 ATR has been ~$17–20, so this is currently the case.)
+- **ATR-SL CAP — expected, do NOT "fix" by raising the cap.** `lastATR × 1.5` (~$28 at H1
+  ATR ~$19) far exceeds the $8 `EMA_TREND_MAX_SL` cap, so every stop is pinned at $8. This looks
+  like lost adaptivity but the cap is PROTECTIVE: position size is floored at `MIN_POSITION_SIZE`
+  (100u), NOT risk-scaled, so a wider stop multiplies the loss directly (100u × $28 ≈ $2,800 vs
+  the current $800). Raising MAX_SL would 3.5× losses for zero upside. Leave it.
+- **POSITION-SIZE FLOOR — the real risk check.** Inspect a `Position sizing:` log line. If
+  `floor(Risk / Distance) < MIN_POSITION_SIZE`, size is pinned at the 100u floor and ACTUAL risk
+  exceeds `MAX_RISK_PER_TRADE`. Seen Jun 2026: Risk=$446 (0.5%) wanted ~55u, floored to 100u →
+  real risk $800 (~0.9%), nearly double. Flag if actual $ risk (units × SL) > configured %.
 - **Is 2:1 R:R actually realized?** Count `TAKE_PROFIT` exits vs trailing-stop exits. If the 2R
   TP almost never hits and winners exit small via the trail, the realized payoff is far below
   2:1 regardless of config — that's the central asymmetry to watch.
@@ -139,9 +144,11 @@ node -e 'const d=JSON.parse(require("fs").readFileSync("/tmp/tracker.json"));con
 - **Breakeven exits working?** Look for SL-at-entry / small-profit trailing closures (not $0
   scratches — the Jun 2026 monotonic-BE fix should have eliminated the give-back-to-$0 case).
 
-Key benchmarks for EMA Trend (from IG backtest):
-- Target win rate: ~47%   |   Target profit factor: > 1.5   |   Avg win ~2x avg loss (2:1 R:R)
-- Breakeven exits should be ~2-5% of trades
+Reference benchmarks (PF 1.73, 47% WR, +£482/59d) come from a SEPARATE **IG-broker** Gold bot
+on a **5-minute** timeframe — the strategy was ported here to Oanda H1 (hence ATR_SL_MULT 1.5 vs
+IG's 2.5, and the $2–$8 SL cap). These numbers were NEVER validated on Oanda — treat them as the
+design's origin, not a target. Judge this bot on its OWN live record.
+- Reference: ~47% WR, PF > 1.5, avg win ~2x avg loss (2:1 R:R), breakeven exits ~2-5% of trades.
 - NOTE: live WR has run higher (~70%) but with payoff INVERTED (avg loss > avg win) because the
   2R TP rarely fills — so a high WR alone is not evidence of edge. Always check PF + payoff.
 
