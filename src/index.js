@@ -284,7 +284,9 @@ class GoldTradingBot {
             const units = Math.abs(parseFloat(trade.initialUnits));
             const riskAmount = riskPerUnit * units;
             const rMultiple = riskAmount > 0 ? pnl / riskAmount : 0;
-            const reason = trade.stopLossOrderID ? 'STOP_LOSS' : (trade.takeProfitOrderID ? 'TAKE_PROFIT' : 'Unknown');
+            // Derive close reason from which protective order actually FILLED (not just exists)
+            const reason = trade.stopLossOrder?.state === 'FILLED' ? 'STOP_LOSS_ORDER'
+              : trade.takeProfitOrder?.state === 'FILLED' ? 'TAKE_PROFIT_ORDER' : 'Unknown';
 
             logger.info(`💰 Closed trade ${tradeId}: ${pnl >= 0 ? '+' : ''}£${pnl.toFixed(2)} (${reason})`);
 
@@ -1338,21 +1340,29 @@ class GoldTradingBot {
         let reason = 'Unknown';
         const entryPrice = tracked.entryPrice;
 
+        let closingTxIds = [];
         try {
-          // Method 1: Direct trade lookup (gets P&L and exit price)
+          // Method 1: Direct trade lookup (P&L, exit price, and close reason from order state)
           const response = await this.client.makeRequest('GET', `/v3/accounts/${this.client.accountId}/trades/${tradeId}`);
           if (response.trade && response.trade.state === 'CLOSED') {
             exitPrice = parseFloat(response.trade.averageClosePrice || entryPrice);
             pnl = parseFloat(response.trade.realizedPL || 0);
+            // Reason is distance-independent: whichever protective order actually FILLED
+            reason = response.trade.stopLossOrder?.state === 'FILLED' ? 'STOP_LOSS_ORDER'
+              : response.trade.takeProfitOrder?.state === 'FILLED' ? 'TAKE_PROFIT_ORDER' : reason;
+            closingTxIds = (response.trade.closingTransactionIDs || []).map(Number);
           }
         } catch (error) {
           logger.debug(`Trade lookup failed for ${tradeId}: ${error.message}`);
         }
 
-        // Method 2: Search recent transactions for the close fill (fills in reason; also fallback for P&L)
+        // Method 2: authoritative reason from the exact closing fill (also P&L fallback).
+        // Use the trade's own closingTransactionIDs — heavily-trailed trades close many IDs
+        // after they open, so a fixed window misses them.
         try {
-          const fromId = parseInt(tradeId);
-          const toId = fromId + 20; // Close transaction is usually within a few IDs
+          const ids = closingTxIds.length ? closingTxIds : [parseInt(tradeId), parseInt(tradeId) + 60];
+          const fromId = Math.min(...ids);
+          const toId = Math.max(...ids);
           const txResponse = await this.client.makeRequest('GET',
             `/v3/accounts/${this.client.accountId}/transactions/idrange?from=${fromId}&to=${toId}`);
           if (txResponse.transactions) {
@@ -1361,7 +1371,7 @@ class GoldTradingBot {
               tx.tradesClosed.some(tc => tc.tradeID === String(tradeId))
             );
             if (closeFill) {
-              reason = closeFill.reason || 'Unknown';
+              reason = closeFill.reason || reason;
               if (pnl === null) {
                 const closedTrade = closeFill.tradesClosed.find(tc => tc.tradeID === String(tradeId));
                 pnl = parseFloat(closedTrade.realizedPL || 0);
