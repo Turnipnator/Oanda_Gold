@@ -318,9 +318,9 @@ class GoldTradingBot {
             // Update risk manager
             this.riskManager.recordTrade(pnl);
 
-            // Update strategy tracker
+            // Update strategy tracker (store the real broker realized P&L, not notional)
             const trackerCloseId = tracked?.trackerTradeId || `LIVE_${tradeId}`;
-            this.tracker.closeTrade(tracked?.strategyName || 'Unknown', trackerCloseId, exitPrice, reason);
+            this.tracker.closeTrade(tracked?.strategyName || 'Unknown', trackerCloseId, exitPrice, reason, pnl);
           }
         } catch (error) {
           logger.warn(`Could not fetch close details for trade ${tradeId}: ${error.message}`);
@@ -1403,9 +1403,9 @@ class GoldTradingBot {
             }
           }
 
-          // Update strategy tracker (use stored tracker ID, fall back to LIVE_ prefix for legacy)
+          // Update strategy tracker (store the real broker realized P&L, not notional)
           const trackerCloseId = tracked.trackerTradeId || `LIVE_${tradeId}`;
-          this.tracker.closeTrade(tracked.strategyName, trackerCloseId, exitPrice || entryPrice, reason);
+          this.tracker.closeTrade(tracked.strategyName, trackerCloseId, exitPrice || entryPrice, reason, pnl);
         } else {
           logger.warn(`⚠️ Could not fetch P&L for trade ${tradeId} - cooldown still set`);
 

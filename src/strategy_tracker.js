@@ -179,7 +179,7 @@ class StrategyTracker {
   /**
    * Close a trade (live or hypothetical)
    */
-  closeTrade(strategyName, tradeId, exitPrice, reason) {
+  closeTrade(strategyName, tradeId, exitPrice, reason, realizedPL = null) {
     const strategy = this.strategies.get(strategyName);
     if (!strategy) return;
 
@@ -189,16 +189,24 @@ class StrategyTracker {
     const trade = strategy.openPositions[tradeIndex];
     const isLong = trade.signal === 'LONG';
 
-    // Calculate P&L
+    // Notional P&L = price move × units (USD price-notional, ignores FX + spread).
+    // Kept for reference, but the broker's realized P&L is the source of truth.
     const priceDiff = isLong
       ? exitPrice - trade.entryPrice
       : trade.entryPrice - exitPrice;
-    const pnl = priceDiff * trade.size;
+    const pnlNotional = priceDiff * trade.size;
+
+    // Prefer the real broker realized P&L (account currency, net of spread/FX).
+    // Fall back to the notional figure for hypothetical strategies with no broker fill.
+    const hasRealPL = realizedPL !== null && realizedPL !== undefined && Number.isFinite(realizedPL);
+    const pnl = hasRealPL ? realizedPL : pnlNotional;
 
     // Update trade
     trade.exitTime = new Date();
     trade.exitPrice = exitPrice;
     trade.pnl = pnl;
+    trade.pnlNotional = pnlNotional;
+    trade.pnlSource = hasRealPL ? 'broker' : 'notional';
     trade.status = 'closed';
     trade.exitReason = reason;
 
