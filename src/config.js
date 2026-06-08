@@ -82,7 +82,7 @@ class Config {
   static EMA_TREND_RSI_OB = parseFloat(process.env.EMA_TREND_RSI_OB || '85');  // Overbought (wide — Gold trends push RSI high)
   static EMA_TREND_RSI_OS = parseFloat(process.env.EMA_TREND_RSI_OS || '15');  // Oversold
   static EMA_TREND_RSI_BUY_MAX = parseFloat(process.env.EMA_TREND_RSI_BUY_MAX || '60');
-  static EMA_TREND_RSI_SELL_MIN = parseFloat(process.env.EMA_TREND_RSI_SELL_MIN || '40');
+  static EMA_TREND_RSI_SELL_MIN = parseFloat(process.env.EMA_TREND_RSI_SELL_MIN || '35');  // Lowered 40→35 Jun 8 2026: backtest_rsi_band.js showed 40 starved shorts (13 in 3mo); 35 ~doubles them (25) with lower median adverse excursion. Rollback to 40 if reversals hurt.
   static EMA_TREND_PULLBACK_PCT = parseFloat(process.env.EMA_TREND_PULLBACK_PCT || '0.3');  // Max % distance from fast EMA
   static EMA_TREND_BE_TRIGGER_PCT = parseFloat(process.env.EMA_TREND_BE_TRIGGER_PCT || '0.3');  // Move SL to breakeven at 30% of TP (lowered from 0.7 Apr 24 - runners weren't reaching 70%)
   static EMA_TREND_TRAIL_ATR_MULT = parseFloat(process.env.EMA_TREND_TRAIL_ATR_MULT || '1.5');  // Post-breakeven trailing = ATR × 1.5

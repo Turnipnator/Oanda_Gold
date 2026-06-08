@@ -67,6 +67,7 @@ services:
       - EMA_TREND_HTF=${EMA_TREND_HTF:-H4}
       - EMA_TREND_LEG_FILTER_THRESHOLD=${EMA_TREND_LEG_FILTER_THRESHOLD:-2.0}
       - EMA_TREND_LEG_FILTER_ENFORCE=${EMA_TREND_LEG_FILTER_ENFORCE:-true}
+      - EMA_TREND_RSI_SELL_MIN=${EMA_TREND_RSI_SELL_MIN:-35}  # Lowered 40→35 Jun 8 2026 (widen short RSI band — see backtest_rsi_band.js). Rollback: set to 40.
 
       # Primary Timeframe (H1 = 24 signals/day vs H4 = 6)
       - TIMEFRAME=${TIMEFRAME:-H1}
