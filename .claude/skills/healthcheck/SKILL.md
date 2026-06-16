@@ -31,6 +31,13 @@ ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "docker ps --format '{{.Names}}
 - **Errors since the last restart only** (don't get distracted by stale clusters): pass
   `--since <container StartedAt>`.
 - **Container restart count** — a climbing count means the watchdog is firing (hangs/crashes).
+- **Known non-fatal noise — do NOT flag as a problem:** `Telegram polling error (non-fatal)`
+  lines (`ECONNRESET`, `ETELEGRAM 429/502`, `ESOCKETTIMEDOUT`) are external Telegram API hiccups,
+  handled gracefully and logged at `warn`. They come in bursts and are harmless. Only escalate if
+  they coincide with a watchdog restart or stop the 15-min scan / 60-s position monitor from
+  logging. The signal to hunt for is `error`-level lines and the order rejections below.
+- **Logs rotate** (`gold_bot.log` → `gold_bot1..4.log`, ~11 MB each). Greps target the current
+  `gold_bot.log`; widen to the rotations only when chasing something older than the live file.
 
 ```bash
 ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "docker logs gold-trading-bot --tail 100 2>&1"
