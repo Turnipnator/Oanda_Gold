@@ -88,7 +88,7 @@ class Config {
   static EMA_TREND_TRAIL_ATR_MULT = parseFloat(process.env.EMA_TREND_TRAIL_ATR_MULT || '1.5');  // Post-breakeven trailing = ATR × 1.5
   static EMA_TREND_HTF = process.env.EMA_TREND_HTF || 'H4';  // Higher timeframe for trend alignment
   static EMA_TREND_MIN_SL = parseFloat(process.env.EMA_TREND_MIN_SL || '200');  // Min SL in pips ($2.00)
-  static EMA_TREND_MAX_SL = parseFloat(process.env.EMA_TREND_MAX_SL || '800');  // Max SL in pips ($8.00)
+  static EMA_TREND_MAX_SL = parseFloat(process.env.EMA_TREND_MAX_SL || '4000');  // Max SL in pips ($40.00). Raised 800→4000 Jun 25 2026: at gold ATR ~$25 the $8 cap sat inside one bar's noise and whipsawed correct trades; let stop be the designed 1.5×ATR ("C" variant). Rollback: 800.
   // Leg-size filter — blocks entries that chase an exhausted move (price already ran
   // > THRESHOLD × ATR in the trade direction over the last LOOKBACK H1 candles).
   // Enforced Jun 1 2026: backtest over 22 EMA Trend trades showed enforcing at 2.0×

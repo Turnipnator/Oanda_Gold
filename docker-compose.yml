@@ -60,6 +60,8 @@ services:
       - EMA_TREND_MEDIUM=${EMA_TREND_MEDIUM:-8}
       - EMA_TREND_SLOW=${EMA_TREND_SLOW:-21}
       - EMA_TREND_ATR_SL_MULT=${EMA_TREND_ATR_SL_MULT:-1.5}
+      - EMA_TREND_MIN_SL=${EMA_TREND_MIN_SL:-200}
+      - EMA_TREND_MAX_SL=${EMA_TREND_MAX_SL:-4000}  # $40 cap. Raised 800→4000 Jun 25 2026 ("C" variant): $8 cap whipsawed correct trades at ATR ~$25. Tune via .env EMA_TREND_MAX_SL. Rollback: 800.
       - EMA_TREND_TP_RR=${EMA_TREND_TP_RR:-2.0}
       - EMA_TREND_ADX_MIN=${EMA_TREND_ADX_MIN:-25}
       - EMA_TREND_PULLBACK_PCT=${EMA_TREND_PULLBACK_PCT:-0.3}
