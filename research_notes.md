@@ -68,3 +68,29 @@ Robust = positive in BOTH windows (not just full). Distrust big TEST numbers on 
 **Open questions / confidence:** TEST n=27 (balanced) — MED sample. Engine models H1-close only (no MTF/realtime fills) → absolute £ approximate, relative ranking HIGH. 4 knobs stacked, but each individually supported AND combo holds out-of-sample. Session filter alone is the safe minimum if we want just one change.
 
 **Next actions:** (1) deploy BALANCED as .env change (paper) — user green-light; (2) after ~15-20 trades, validate live vs backtest; (3) revisit honest sizing before real money (unchanged concern).
+
+---
+
+## PART 2 — Cross-strategy comparison (Jul 1 2026): EMA Trend vs Triple Confirmation vs Breakout+ADX
+Same 24mo, faithful multi-strategy engine (`backtest_engine2.js` drives each REAL strategy class). Native exit = each strategy's own; Common exit = EMA-Trend ATR mgmt (isolates ENTRY edge). Walk-forward train/test.
+
+### The unifying insight [HIGH]
+- **COMMON-exit (tight ATR mgmt on all three) is negative-to-breakeven for EVERY strategy:** EMA −0.032, Triple −0.005, Breakout −0.009. → No strategy's ENTRIES have a standalone edge under tight management. The edge lives in the EXIT + regime, not the entry signal.
+- Trailing-only ("let winners run") rescues BREAKOUT entries (momentum → sustained moves) but NOT EMA pullback entries (fade → reverse; tested separately). Exit must match entry character.
+
+### Native-exit head-to-head (+ session filter where it helps)
+| Contender | expR | PF | maxDD | WR | trades/mo | robust | profile |
+|---|---|---|---|---|---|---|---|
+| **EMA BALANCED (deployed)** | +0.117 | **2.23** | **2R** | 87% | 3.3 | ✓ | high-WR grind, tiny DD |
+| Triple native + session | +0.035 | 1.06 | 18.7R | 43% | 5.6 | ✗ (train −) | breakeven, deep DD |
+| Breakout native + session | +0.114 | 1.18 | 20.3R | 43% | 6.2 | ✓ | trend-ride (session HURTS it) |
+| Breakout native (24h) | +0.133 | 1.21 | 12R | 43% | 9.8 | ✓ | best raw return, deep DD |
+
+### Verdict [confidence noted]
+- **Triple Confirmation: RULE OUT.** Breakeven at best (native full +0.035 PF1.06; common −0.005), not robust (train negative), 18R DD. No reason to switch. [HIGH]
+- **EMA BALANCED: best RISK-ADJUSTED (expR/DD = 0.058 vs breakout 0.011 — ~5× better).** Tiny 2R DD, 87% WR, robust. Stays the primary. [HIGH]
+- **Breakout native (trailing-only): highest RAW return (~£13.5k vs £4k) & robust, BUT** (a) 12-20R drawdowns, 43% WR (long losing streaks); (b) FIDELITY CAVEAT [LOW-MED trust]: this is the RAW candle-close version (ENABLE_MTF=false, no realtime/momentum/fakeout filters) — i.e. it OMITS exactly the realtime whipsaws that made the LIVE breakout strategy fail (33% live WR → abandoned for EMA Trend). The backtest likely FLATTERS it. Do NOT switch on this number alone.
+- Session filter is EMA-Trend-specific (liquidity-sensitive pullbacks); it HURTS breakout (which rides Asian-session momentum too).
+
+### CONCLUSION (Part 2)
+Keep EMA BALANCED as primary (best risk-adjusted, deployed). Triple ruled out. Breakout-trailing is an intriguing higher-return/higher-DD trend sleeve worth a *separate* faithful study (with the live realtime/MTF machinery, not the raw version) IF more return is wanted and the drawdown is acceptable — not a drop-in switch. Biggest scientific takeaway: entry choice barely matters under tight mgmt; EXIT+regime is the edge.
