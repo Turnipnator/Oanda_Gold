@@ -94,3 +94,34 @@ Same 24mo, faithful multi-strategy engine (`backtest_engine2.js` drives each REA
 
 ### CONCLUSION (Part 2)
 Keep EMA BALANCED as primary (best risk-adjusted, deployed). Triple ruled out. Breakout-trailing is an intriguing higher-return/higher-DD trend sleeve worth a *separate* faithful study (with the live realtime/MTF machinery, not the raw version) IF more return is wanted and the drawdown is acceptable — not a drop-in switch. Biggest scientific takeaway: entry choice barely matters under tight mgmt; EXIT+regime is the edge.
+
+---
+
+## PART 3 — Breakout-trailing sleeve deep study (Jul 1 2026). Scripts: `backtest_engine2.js` + bk_study/dump2/stress (scratchpad).
+
+### Robustness [HIGH] — the edge is NOT curve-fit
+Native trailing-only, swept walk-forward: ROBUST✓ (positive train AND test) across lookback 5/10/15/20/25, trail $1–2.5, activation $2–7. Tighter = better in-sample (lookback 5 +0.25R; stop $2 +0.30R) BUT tight stops are exactly where realtime whipsaws bite → discount them. The LIVE $5.50 stop backtests NEGATIVE.
+
+### Diversification [HIGH] — genuine, but doesn't improve efficiency
+Monthly-return correlation with EMA BALANCED = **−0.02** (uncorrelated; worst months don't coincide). Combined portfolio (R-units, 1.0 = EMA per-trade risk):
+| portfolio | totalR | maxDD | ret/DD |
+|---|---|---|---|
+| EMA only | 8.9 | 2.0 | **4.34** |
+| EMA + 0.25× BK | 16.4 | 4.2 | 3.86 |
+| EMA + 0.5× BK | 23.9 | 6.9 | 3.45 |
+| EMA + 1.0× BK | 38.9 | 13.0 | 3.00 |
+| BK only | 30.1 | 12.1 | 2.49 |
+A sleeve ~doubles return but ~doubles DD; risk-adjusted quality falls (BK's standalone 2.49 drags the blend). Diversification shaves ~1R off DD vs naive-sum, not enough to win on efficiency.
+
+### FATAL FLAW [HIGH] — the edge lives entirely inside transaction costs
+Entry-cost stress (breakout is 226 trades w/ tiny per-trade edge):
+| cost/trade | FULL expR | verdict |
+|---|---|---|
+| $0.30 (idealized) | +0.133 | robust |
+| **$0.75** | **−0.017** | edge GONE |
+| $1.00 | −0.100 | negative |
+| $1.50 | −0.267 | deeply negative |
+Live breakout ran ~$1.30–1.50 spread + realtime-entry slippage → squarely negative. **This is exactly why live breakout failed (33% WR) and was abandoned.** Contrast — EMA BALANCED cost sensitivity: $0.75→+0.083, $1.00→+0.064, breaks even only ~$2.00. EMA is ~3× more cost-robust (76 trades, bigger stops, higher per-trade edge).
+
+### CONCLUSION (Part 3) — DO NOT run the breakout sleeve
+The backtest edge is an artifact of idealized costs. It is robust across *parameters* but NOT across the one variable that actually sank it live — cost/fills. Beautiful diversification profile (−0.02 corr), but the edge isn't real net of realistic transaction costs. This retroactively validates abandoning breakout and choosing EMA Trend. **Final: EMA BALANCED stays the sole strategy.** Return-boosting should come from honest sizing / letting the proven edge compound, not from adding a cost-fragile sleeve.
