@@ -45,6 +45,12 @@ class Config {
   // Trading Instrument
   static TRADING_SYMBOL = process.env.TRADING_SYMBOL || 'XAU_USD';
 
+  // Config regime tag — stamped onto every tracker trade so later analysis can
+  // segment by exit/sizing regime instead of pooling incomparable trades.
+  // Bump this string in .env whenever a behaviour-changing config deploy happens
+  // (e.g. 'bracket-jul10'). Log-only: never read by trading logic.
+  static CONFIG_REGIME = process.env.CONFIG_REGIME || 'unversioned';
+
   // Triple Confirmation Strategy Parameters
   static EMA_FAST = parseInt(process.env.EMA_FAST || '20');
   static EMA_SLOW = parseInt(process.env.EMA_SLOW || '50');

@@ -99,6 +99,9 @@ services:
       # Trade Cooldown - prevents rapid re-entries after stop-loss
       - TRADE_COOLDOWN_HOURS=${TRADE_COOLDOWN_HOURS:-2}
 
+      # Config regime tag - stamped onto tracker trades (log-only, bump on config deploys)
+      - CONFIG_REGIME=${CONFIG_REGIME:-unversioned}
+
       # Max Slippage Protection - worst acceptable fill price distance from entry
       - MAX_SLIPPAGE_PIPS=${MAX_SLIPPAGE_PIPS:-200}
 

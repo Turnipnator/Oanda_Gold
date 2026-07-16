@@ -1042,13 +1042,20 @@ class GoldTradingBot {
       // Persist position to file
       this.savePositions();
 
-      // Record in strategy tracker and store tracker ID for closure matching
-      const trackerMetadata = (setup && setup.legATR !== undefined) ? {
-        legATR: setup.legATR,
-        legSize: setup.legSize,
-        legInDirection: setup.legInDirection,
-        legWouldBlock: setup.legWouldBlock,
-      } : null;
+      // Record in strategy tracker and store tracker ID for closure matching.
+      // regime + entrySnapshot let later analysis segment trades by config era
+      // and market state without pooling incomparable regimes. Log-only.
+      const trackerMetadata = {
+        regime: Config.CONFIG_REGIME,
+        entryHourUK: this.checkTradingHours().currentHour,
+        ...(setup && setup.legATR !== undefined ? {
+          legATR: setup.legATR,
+          legSize: setup.legSize,
+          legInDirection: setup.legInDirection,
+          legWouldBlock: setup.legWouldBlock,
+        } : {}),
+        ...(setup && setup.entrySnapshot ? { entrySnapshot: setup.entrySnapshot } : {}),
+      };
       const trackerTrade = this.tracker.recordSignal(
         strategyName,
         signal,

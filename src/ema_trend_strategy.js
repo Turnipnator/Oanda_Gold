@@ -308,6 +308,18 @@ class EmaTrendStrategy {
       legSize: legInfo.legSize,
       legInDirection: legInfo.legInDirection,
       legWouldBlock: legInfo.wouldBlock,
+      // Indicator snapshot at signal time — stamped into the tracker so later
+      // analysis can segment outcomes by market state. Log-only, never read back.
+      entrySnapshot: {
+        emaFast: parseFloat(fast.toFixed(2)),
+        emaMedium: parseFloat(medium.toFixed(2)),
+        emaSlow: parseFloat(slow.toFixed(2)),
+        atr: parseFloat(atr.toFixed(2)),
+        adx: parseFloat(adx.toFixed(1)),
+        rsi: parseFloat(rsi.toFixed(1)),
+        price: parseFloat(price.toFixed(2)),
+        pullbackPct: parseFloat((priceDistancePct * 100).toFixed(3)),
+      },
     };
   }
 
