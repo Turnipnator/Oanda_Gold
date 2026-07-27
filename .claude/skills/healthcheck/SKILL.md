@@ -49,7 +49,7 @@ ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "tail -40 /root/Oanda_Gold/logs
 
 ## 3. STRATEGY STATUS
 The bot currently supports three strategies (check which is LIVE via STRATEGY_TYPE env var):
-- **EMA Trend (3/8/21)** — trend-following with pullback entries, ATR-based stops (×1.5, capped $2–$8), 2:1 R:R, **breakeven at 30% of TP** (lowered from 70% in Apr 2026), then **$1.50 pre-BE trail** (widened from $0.75 Jun 2026), monotonic stop, post-BE ATR trail capped to SL bounds. **Leg filter ENFORCED at 2.0×** (Jun 2026) — rejects entries chasing a move that already ran >2× ATR over the last 6 H1 candles.
+- **EMA Trend (3/8/21)** — trend-following with pullback entries, ATR-based stops (×1.5, capped $2–$20), 2:1 R:R. **BRACKET EXIT since Jul 10 2026: trail OFF, breakeven OFF** — a trade now resolves at its resting 2R take-profit or its original stop, nothing in between. (Superseded: the BE-at-30% + $1.50 pre-BE trail described in earlier versions of this skill is disabled; `TRAILING_STOP_DISTANCE_PIPS` is inert.) **Leg filter ENFORCED at 2.0×** (Jun 2026) — rejects entries chasing a move that already ran >2× ATR over the last 6 H1 candles.
 - **Breakout + ADX** — Donchian channel breakouts with MTF pullback entries
 - **Triple Confirmation** — EMA crossover + RSI + candlestick patterns
 
@@ -110,11 +110,20 @@ ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "docker stats gold-trading-bot 
 ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "docker exec gold-trading-bot env | grep -E 'STRATEGY|EMA_TREND|LEG_FILTER|ALLOW_SHORT|TRAILING|TAKE_PROFIT|BREAKOUT_STOP|TRADE_COOLDOWN|TRADING_START|TRADING_END' | sort"
 ```
 
-Expected current values (flag any drift):
-- `STRATEGY_TYPE=ema_trend`, `ALLOW_SHORT=true`, `TRADING_START_HOUR=0`, `TRADING_END_HOUR=24`
+Expected current values — **BRACKET-EXIT regime, deployed Jul 10 2026** (flag any drift):
+- `STRATEGY_TYPE=ema_trend`, `ALLOW_SHORT=true`, `CONFIG_REGIME=bracket-jul10`
+- **Exit (the whole point of this regime):** `ENABLE_TRAILING_STOP=false`, `EMA_TREND_BE_TRIGGER_PCT=0`,
+  `EMA_TREND_TP_RR=2.0`. Trail and breakeven are BOTH off so the resting 2R TP can fire.
+  `TRAILING_STOP_DISTANCE_PIPS=150` is still set but INERT — ignore it, do not "fix" it.
+- **BALANCED session/filters (Jul 1 2026):** `TRADING_START_HOUR=8`, `TRADING_END_HOUR=22`,
+  `EMA_TREND_ADX_MIN=20`, `EMA_TREND_RSI_SELL_MIN=45`, `EMA_TREND_MAX_SL=2000` ($20 cap)
 - `EMA_TREND_LEG_FILTER_ENFORCE=true`, `EMA_TREND_LEG_FILTER_THRESHOLD=2.0`
-- `TRAILING_STOP_DISTANCE_PIPS=150` ($1.50 pre-BE trail), `EMA_TREND_BE_TRIGGER_PCT=0.3`
-- `EMA_TREND_ATR_SL_MULT=1.5`, `EMA_TREND_TP_RR=2.0`, `TRADE_COOLDOWN_HOURS=2`
+- `EMA_TREND_ATR_SL_MULT=1.5`, `TRADE_COOLDOWN_HOURS=2`
+- **Sizing:** `MIN_POSITION_SIZE=10` (was 100 — the floor that caused the £1,818 outlier),
+  `MAX_RISK_PER_TRADE=0.005`. At a $20 stop this yields ~21 units ≈ £433 risk. Flag if size
+  is pinned at the floor again.
+
+⚠️ Rollback for this regime: `/root/Oanda_Gold/.env.bak-20260710-bracket` then `docker compose up -d`.
 
 These live in THREE places (config.js default, docker-compose.yml `${VAR:-default}`, VPS `.env`
 override) — a value can be correct in one and wrong in the container. The `env` output above
@@ -145,18 +154,18 @@ node -e 'const d=JSON.parse(require("fs").readFileSync("/tmp/tracker.json"));con
 ```
 
 - Win rate, profit factor, avg win vs avg loss (payoff ratio).
-- **ATR-SL CAP — expected, do NOT "fix" by raising the cap.** `lastATR × 1.5` (~$28 at H1
-  ATR ~$19) far exceeds the $8 `EMA_TREND_MAX_SL` cap, so every stop is pinned at $8. This looks
-  like lost adaptivity but the cap is PROTECTIVE: position size is floored at `MIN_POSITION_SIZE`
-  (100u), NOT risk-scaled, so a wider stop multiplies the loss directly (100u × $28 ≈ $2,800 vs
-  the current $800). Raising MAX_SL would 3.5× losses for zero upside. Leave it.
-- **POSITION-SIZE FLOOR — the real risk check.** Inspect a `Position sizing:` log line. If
-  `floor(Risk / Distance) < MIN_POSITION_SIZE`, size is pinned at the 100u floor and ACTUAL risk
-  exceeds `MAX_RISK_PER_TRADE`. Seen Jun 2026: Risk=$446 (0.5%) wanted ~55u, floored to 100u →
-  real risk $800 (~0.9%), nearly double. Flag if actual $ risk (units × SL) > configured %.
-- **Is 2:1 R:R actually realized?** Count `TAKE_PROFIT` exits vs trailing-stop exits. If the 2R
-  TP almost never hits and winners exit small via the trail, the realized payoff is far below
-  2:1 regardless of config — that's the central asymmetry to watch.
+- **ATR-SL CAP — expected, do NOT "fix" by raising the cap.** `lastATR × 1.5` (~$21 at H1
+  ATR ~$14) exceeds the $20 `EMA_TREND_MAX_SL` cap, so most stops sit pinned at $20. That is
+  intended: the cap bounds worst-case loss. (Historic note: the cap was $8 until Jun 25 2026 and
+  the sizing floor was 100u — that combination is what produced the £1,818 outlier. Both are fixed.)
+- **POSITION-SIZE FLOOR — the real risk check.** Inspect a `Position sizing:` log line. Healthy
+  now looks like `Risk=$433, Distance=$20.00, Size=21 units` — i.e. genuinely risk-scaled, well
+  clear of the `MIN_POSITION_SIZE=10` floor. Flag only if size lands ON the floor, which would
+  mean actual $ risk exceeds `MAX_RISK_PER_TRADE` again.
+- **Is 2:1 R:R actually realized?** Count `TAKE_PROFIT_ORDER` exits vs `STOP_LOSS_ORDER`. Under
+  the pre-Jul-10 config the answer was 0/35 — the $1.50 trail always fired first
+  (see [[tp-never-reached-trail-preempts]]). **First TP hit Jul 22 2026: +£621, exactly 2.0R.**
+  Bracket-era trades need ≥20 before PF means anything; expect ~3/month and holds of hours-to-days.
 - **Leg-filter edge:** split trades by `legWouldBlock` and compare P&L of blocked vs allowed —
   confirms the filter is removing losers, not winners, out of sample.
 - **Breakeven exits working?** Look for SL-at-entry / small-profit trailing closures (not $0
