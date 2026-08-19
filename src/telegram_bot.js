@@ -639,7 +639,9 @@ class GoldTelegramBot {
       `🤖 Strategy: ${strategyEscaped}\n` +
       `Symbol: ${symbolEscaped}\n` +
       `Side: ${side}\n` +
-      `Confidence: ${(confidence * 100).toFixed(0)}%\n` +
+      // EMA Trend hands over a 0-1 fraction, Breakout + ADX whole percents. A flat
+      // ×100 is right for the former and prints "8000%" for the latter, so normalise.
+      `Confidence: ${(confidence <= 1 ? confidence * 100 : confidence).toFixed(0)}%\n` +
       `Entry: $${entryPrice.toFixed(2)}\n` +
       `Size: ${size} units\n` +
       `Stop Loss: $${stopLoss.toFixed(2)}\n` +

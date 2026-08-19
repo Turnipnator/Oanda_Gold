@@ -102,8 +102,10 @@ services:
       # Config regime tag - stamped onto tracker trades (log-only, bump on config deploys)
       - CONFIG_REGIME=${CONFIG_REGIME:-unversioned}
 
-      # Max Slippage Protection - worst acceptable fill price distance from entry
+      # Max Slippage Protection - worst acceptable fill distance from the LIVE market price
       - MAX_SLIPPAGE_PIPS=${MAX_SLIPPAGE_PIPS:-200}
+      # Chase filter - max adverse move from the (possibly stale) signal price before we cancel
+      - MAX_ENTRY_DRIFT_PIPS=${MAX_ENTRY_DRIFT_PIPS:-200}
 
       # Position Sizing
       - MIN_POSITION_SIZE=${MIN_POSITION_SIZE:-100}

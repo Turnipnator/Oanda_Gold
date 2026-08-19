@@ -173,10 +173,18 @@ class Config {
   // Prevents repeated losses on the same failed breakout level
   static TRADE_COOLDOWN_HOURS = parseFloat(process.env.TRADE_COOLDOWN_HOURS || '2'); // 2 hours - 1h caused losses right at cooldown expiry (Feb 6, 9, 10)
 
-  // Max slippage protection - worst acceptable fill price distance from intended entry
-  // If market has moved more than this from our intended entry, order is rejected (not filled at bad price)
+  // Max slippage protection - worst acceptable fill distance from the LIVE market price
+  // at the moment the order is sent. Purely a bad-fill guard: it says nothing about how
+  // far price has travelled since the signal (that is MAX_ENTRY_DRIFT_PIPS below).
   // 200 pips = $2.00 - generous for spread + minor slippage, rejects catastrophic fills
   static MAX_SLIPPAGE_PIPS = parseFloat(process.env.MAX_SLIPPAGE_PIPS || '200');
+
+  // Max entry drift (chase filter) - how far the market may have run AGAINST the signal
+  // price before we refuse the entry. levels.entryPrice comes from the last completed H1
+  // close and can be up to 60 minutes stale, so this is a genuine "don't chase" check.
+  // Adverse direction only - a price that has moved in our favour is never rejected.
+  // 200 pips = $2.00, matching the effective threshold of the old combined bound.
+  static MAX_ENTRY_DRIFT_PIPS = parseFloat(process.env.MAX_ENTRY_DRIFT_PIPS || '200');
 
   // Position Sizing (Oanda uses units: 1 unit = $1 worth of gold)
   static MIN_POSITION_SIZE = parseInt(process.env.MIN_POSITION_SIZE || '100');

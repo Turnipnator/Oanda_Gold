@@ -25,6 +25,21 @@ const DATA_DIR = process.env.NODE_ENV === 'production' ? '/app/data' : path.join
 const POSITIONS_FILE = path.join(DATA_DIR, 'active_positions.json');
 const COOLDOWN_FILE = path.join(DATA_DIR, 'trade_cooldown.json');
 
+/**
+ * Render a strategy confidence as a percentage string.
+ *
+ * The strategies disagree on scale: EMA Trend clamps to a 0-1 fraction while
+ * Breakout + ADX returns whole percents (80). Printing either one raw next to a
+ * literal '%' was wrong for one of them - an EMA Trend signal logged as "0.8%"
+ * when it meant 80%. Values at or below 1 are treated as fractions; anything
+ * larger is already a percentage.
+ */
+function formatConfidence(value) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 'n/a';
+  const pct = value <= 1 ? value * 100 : value;
+  return `${pct.toFixed(0)}%`;
+}
+
 class GoldTradingBot {
   constructor() {
     this.isRunning = false;
@@ -694,7 +709,7 @@ class GoldTradingBot {
       logger.info('🎯 LIVE TRADE SETUP DETECTED!');
       logger.info(`🟢 Strategy: ${liveStrategyName}`);
       logger.info(`Signal: ${liveSetup.signal}`);
-      logger.info(`Confidence: ${liveSetup.confidence}%`);
+      logger.info(`Confidence: ${formatConfidence(liveSetup.confidence)}`);
       logger.info(`Reason: ${liveSetup.reason}`);
       logger.info('');
 
@@ -816,7 +831,7 @@ class GoldTradingBot {
       logger.info('🎬 EXECUTING LIVE TRADE...');
       logger.info(`🟢 Strategy: ${strategyName}`);
       logger.info(`Side: ${signal}`);
-      logger.info(`Confidence: ${confidence}%`);
+      logger.info(`Confidence: ${formatConfidence(confidence)}`);
       logger.info(`Units: ${Math.abs(units)}`);
       logger.info(`Entry: $${levels.entryPrice.toFixed(2)}`);
       logger.info(`Stop Loss: $${levels.stopLoss.toFixed(2)}`);
@@ -827,7 +842,13 @@ class GoldTradingBot {
         logger.info(`Take Profit 1: $${levels.takeProfit1.toFixed(2)} (60%)`);
         logger.info(`Take Profit 2: $${levels.takeProfit2.toFixed(2)} (40%)`);
       } else {
-        logger.info(`Take Profit: $${levels.takeProfit1.toFixed(2)} (single TP @ ${Config.TAKE_PROFIT_RR}R)`);
+        // Derive the R multiple from the actual levels rather than printing a config
+        // constant. TAKE_PROFIT_RR only governs the legacy strategies; EMA Trend sets its
+        // target from EMA_TREND_TP_RR, so reading the former labelled a genuine 2R target
+        // as "1R". Measuring the prices we are about to send is right for every strategy.
+        const tpRisk = Math.abs(levels.entryPrice - levels.stopLoss);
+        const tpRR = tpRisk > 0 ? Math.abs(levels.takeProfit1 - levels.entryPrice) / tpRisk : 0;
+        logger.info(`Take Profit: $${levels.takeProfit1.toFixed(2)} (single TP @ ${tpRR.toFixed(1)}R)`);
       }
       logger.info('');
 
@@ -840,14 +861,55 @@ class GoldTradingBot {
         takeProfit = levels.takeProfit1;
       }
 
-      // Calculate price bound for slippage protection
-      // LONG: max fill = entry + slippage, SHORT: min fill = entry - slippage
+      // Two DISTINCT guards. These used to be one bound anchored to levels.entryPrice,
+      // which comes from the last COMPLETED H1 close and can be up to 60 minutes stale —
+      // so the "slippage" bound was really measuring how far price had run since the
+      // signal, and the broker rejected it after the fact with BOUNDS_VIOLATION.
+      //   1. CHASE — has the market run away from the signal? Cancel here, before sending
+      //      anything. Adverse direction only; a price in our favour is never rejected.
+      //   2. SLIPPAGE — how far off the LIVE market may the fill land? Anchored to the
+      //      current price, which is what MAX_SLIPPAGE_PIPS always claimed to mean.
       const isLongOrder = signal === 'LONG';
       const slippageAmount = Config.pipsToPrice(Config.MAX_SLIPPAGE_PIPS);
+      const maxDrift = Config.pipsToPrice(Config.MAX_ENTRY_DRIFT_PIPS);
+
+      let boundAnchor = levels.entryPrice; // fallback to old behaviour if pricing is unavailable
+      try {
+        const live = await this.client.getPrice(Config.TRADING_SYMBOL);
+        // Bound the side we actually fill on: LONG pays the ask, SHORT hits the bid.
+        boundAnchor = isLongOrder ? live.ask : live.bid;
+
+        const adverseDrift = isLongOrder
+          ? live.mid - levels.entryPrice
+          : levels.entryPrice - live.mid;
+
+        if (adverseDrift > maxDrift) {
+          logger.warn(
+            `🚫 Entry cancelled - price ran $${adverseDrift.toFixed(2)} against the signal ` +
+            `(limit $${maxDrift.toFixed(2)}): signal $${levels.entryPrice.toFixed(2)} → market ` +
+            `$${live.mid.toFixed(2)}. Not chasing.`
+          );
+          return;
+        }
+
+        logger.info(
+          `📏 Entry drift: $${adverseDrift.toFixed(2)} vs signal ` +
+          `(limit $${maxDrift.toFixed(2)}), spread $${live.spread.toFixed(2)}`
+        );
+      } catch (priceError) {
+        logger.warn(
+          `⚠️ Live price unavailable for chase check (${priceError.message}) - ` +
+          `bounding slippage off the signal price instead`
+        );
+      }
+
       const priceBound = isLongOrder
-        ? levels.entryPrice + slippageAmount
-        : levels.entryPrice - slippageAmount;
-      logger.info(`🛡️ Max fill price: $${priceBound.toFixed(2)} (max slippage: $${slippageAmount.toFixed(2)})`);
+        ? boundAnchor + slippageAmount
+        : boundAnchor - slippageAmount;
+      logger.info(
+        `🛡️ Max fill price: $${priceBound.toFixed(2)} ` +
+        `(max slippage $${slippageAmount.toFixed(2)} from $${boundAnchor.toFixed(2)})`
+      );
 
       let order = await this.client.placeMarketOrder(
         Config.TRADING_SYMBOL,
@@ -918,9 +980,16 @@ class GoldTradingBot {
       }
 
       if (!order.success) {
-        logger.error(`Order failed: ${order.reason}`);
+        // A bounds violation is the slippage guard doing its job — the market moved
+        // between decision and fill and we declined the price. That is a working safety
+        // net, not a fault, so it is logged at warn and kept out of error.log.
+        const rejectText = `${order.reason || ''} ${order.rejectReason || ''}`;
+        const log = /BOUNDS_VIOLATION/i.test(rejectText)
+          ? logger.warn.bind(logger)
+          : logger.error.bind(logger);
+        log(`Order failed: ${order.reason}`);
         if (order.rejectReason) {
-          logger.error(`Reject reason: ${order.rejectReason}`);
+          log(`Reject reason: ${order.rejectReason}`);
         }
         return;
       }
@@ -1026,7 +1095,21 @@ class GoldTradingBot {
         const minTrail = Config.pipsToPrice(Config.EMA_TREND_MIN_SL);
         const maxTrail = Config.pipsToPrice(Config.EMA_TREND_MAX_SL);
         positionData.atrTrailDistance = Math.max(minTrail, Math.min(maxTrail, rawTrail));
-        logger.info(`📊 Breakeven at $${positionData.breakevenTriggerDistance.toFixed(2)} profit, then trail at $${positionData.atrTrailDistance.toFixed(2)} (raw ATR trail $${rawTrail.toFixed(2)} capped to SL bounds)`);
+        // Only announce the machinery that is actually armed. Under the bracket-exit
+        // regime BE_TRIGGER_PCT is 0 (so breakevenTriggerDistance is falsy and the BE
+        // check at monitor time never fires) and ENABLE_TRAILING_STOP is false — printing
+        // "Breakeven at $0.00 profit, then trail at $20.00" implied both were live.
+        const beArmed = positionData.breakevenTriggerDistance > 0;
+        const trailArmed = Config.ENABLE_TRAILING_STOP;
+        if (beArmed && trailArmed) {
+          logger.info(`📊 Breakeven at $${positionData.breakevenTriggerDistance.toFixed(2)} profit, then trail at $${positionData.atrTrailDistance.toFixed(2)} (raw ATR trail $${rawTrail.toFixed(2)} capped to SL bounds)`);
+        } else if (beArmed) {
+          logger.info(`📊 Breakeven at $${positionData.breakevenTriggerDistance.toFixed(2)} profit (trailing disabled)`);
+        } else if (trailArmed) {
+          logger.info(`📊 Trailing at $${positionData.atrTrailDistance.toFixed(2)} (raw ATR trail $${rawTrail.toFixed(2)} capped to SL bounds), breakeven disabled`);
+        } else {
+          logger.info(`📊 Bracket exit: resting TP or original stop only (breakeven and trailing both disabled)`);
+        }
       }
 
       // Observational leg filter — stamp the trade so we can correlate with outcome later
@@ -1392,10 +1475,22 @@ class GoldTradingBot {
 
         // Log P&L (use what we have, even if incomplete)
         if (pnl !== null) {
-          const units = Math.abs(tracked.units || 1);
+          // R-multiple comes from PRICES, not from P&L. realizedPL is in account currency
+          // (GBP) while riskPerUnit × units is a USD price-notional — dividing one by the
+          // other silently understated R by the FX rate, so a clean 2.0R take-profit was
+          // reported as "+1.46R". Price-based R is currency-free and needs no conversion.
           const riskPerUnit = tracked.stopLoss ? Math.abs(entryPrice - tracked.stopLoss) : 0;
-          const riskAmount = riskPerUnit * units;
-          const rMultiple = riskAmount > 0 ? pnl / riskAmount : 0;
+          const isLongTrade = tracked.signal
+            ? tracked.signal === 'LONG'
+            : (tracked.stopLoss || 0) < entryPrice;
+          let rMultiple = 0;
+          if (riskPerUnit > 0 && Number.isFinite(exitPrice)) {
+            const priceMove = isLongTrade ? exitPrice - entryPrice : entryPrice - exitPrice;
+            rMultiple = priceMove / riskPerUnit;
+          } else if (riskPerUnit > 0) {
+            // No exit price available — fall back to the P&L ratio (FX-approximate).
+            rMultiple = pnl / (riskPerUnit * Math.abs(tracked.units || 1));
+          }
           const rSign = rMultiple >= 0 ? '+' : '';
           logger.info(`💰 P&L: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} (${rSign}${rMultiple.toFixed(2)}R)`);
           logger.info(`Reason: ${reason}`);
@@ -1521,7 +1616,7 @@ class GoldTradingBot {
           logger.info('🎯 REALTIME MTF PULLBACK ENTRY!');
           logger.info(`Signal: ${mtfResult.signal}`);
           logger.info(`Entry: $${mtfResult.entryPrice.toFixed(2)}`);
-          logger.info(`Confidence: ${mtfResult.confidence}%`);
+          logger.info(`Confidence: ${formatConfidence(mtfResult.confidence)}`);
           logger.info(`Reason: ${mtfResult.reason}`);
           logger.info('');
 
@@ -1613,7 +1708,7 @@ class GoldTradingBot {
       logger.info('🎯 REAL-TIME BREAKOUT SIGNAL!');
       logger.info(`Signal: ${result.signal}`);
       logger.info(`Entry: $${result.entryPrice.toFixed(2)}`);
-      logger.info(`Confidence: ${result.confidence}%`);
+      logger.info(`Confidence: ${formatConfidence(result.confidence)}`);
       logger.info(`Reason: ${result.reason}`);
       logger.info('');
 
