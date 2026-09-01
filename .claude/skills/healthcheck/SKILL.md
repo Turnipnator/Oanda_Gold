@@ -25,6 +25,12 @@ ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "docker ps --format '{{.Names}}
 - Check the last 100 lines of logs for errors, warnings, or anomalies
 - Identify any recurring error patterns
 - Check log file sizes (logs not growing unbounded)
+- **Scan for BRACKET ALERTS (highest priority).** Since Sep 1 2026 the bot verifies the post-fill
+  stop/target against Oanda instead of assuming the modification applied. Two error-level lines
+  mean a real trade is running on levels the bot could NOT confirm, and both also fire a Telegram
+  alert: `BRACKET UNVERIFIED` (bracket is off the intended levels — position still protected) and
+  `NO STOP LOSS` (position is genuinely unprotected — act immediately, check Oanda by hand).
+  Neither has fired yet; the first occurrence is a real incident, not noise.
 - **Scan for ORDER REJECTIONS** — `BOUNDS_VIOLATION` (slippage guard rejecting fills),
   `INSUFFICIENT_MARGIN`, `MARKET_HALTED`. A burst of these around a trade means the bot
   fought to enter a fast-moving market — correlate with the next fill's outcome.
@@ -44,7 +50,7 @@ ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "docker logs gold-trading-bot -
 ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "du -sh /root/Oanda_Gold/logs/*"
 ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "docker inspect gold-trading-bot --format 'RestartCount={{.RestartCount}} StartedAt={{.State.StartedAt}}'"
 # order rejections + hard errors (last 24h)
-ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "tail -40 /root/Oanda_Gold/logs/error.log; echo '---REJECTIONS---'; grep -iE 'BOUNDS_VIOLATION|INSUFFICIENT_MARGIN|MARKET_HALTED|REJECT' /root/Oanda_Gold/logs/gold_bot.log | tail -20"
+ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "tail -40 /root/Oanda_Gold/logs/error.log; echo '---REJECTIONS---'; grep -iE 'BOUNDS_VIOLATION|INSUFFICIENT_MARGIN|MARKET_HALTED|REJECT' /root/Oanda_Gold/logs/gold_bot.log | tail -20; echo '---BRACKET ALERTS (any hit = incident)---'; grep -aE 'BRACKET UNVERIFIED|NO STOP LOSS|Bracket adjustment attempt' /root/Oanda_Gold/logs/gold_bot.log | tail -20"
 ```
 
 ## 3. STRATEGY STATUS
