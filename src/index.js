@@ -1012,33 +1012,71 @@ class GoldTradingBot {
         ? order.price - stopDistance
         : order.price + stopDistance;
 
-      if (Math.abs(correctStopLoss - levels.stopLoss) > 0.01) {
-        logger.info(`🔧 Adjusting SL from $${levels.stopLoss.toFixed(2)} to $${correctStopLoss.toFixed(2)} (based on fill price $${order.price.toFixed(2)})`);
-        try {
-          await this.client.modifyTrade(order.tradeId, correctStopLoss, null);
-          levels.stopLoss = correctStopLoss;
-        } catch (slError) {
-          logger.warn(`Failed to adjust SL: ${slError.message} - keeping original SL`);
-        }
-      }
-
-      // Recalculate TP based on actual fill price (same reason as SL above)
+      // Recalculate TP from the actual fill price too (same reason as the SL above)
       // Without this, slippage makes TP closer than intended — e.g. 0.75:1 instead of 1:1
+      let correctTP = null;
       if (!Config.TRAILING_ONLY && !Config.ENABLE_STAGED_TP) {
         const tpRR = isEmaTrend ? Config.EMA_TREND_TP_RR : Config.TAKE_PROFIT_RR;
         const tpDistance = stopDistance * tpRR;
-        const correctTP = isLong
+        correctTP = isLong
           ? order.price + tpDistance
           : order.price - tpDistance;
+      }
 
-        if (Math.abs(correctTP - levels.takeProfit1) > 0.01) {
-          logger.info(`🔧 Adjusting TP from $${levels.takeProfit1.toFixed(2)} to $${correctTP.toFixed(2)} (based on fill price $${order.price.toFixed(2)})`);
+      if (Math.abs(correctStopLoss - levels.stopLoss) > 0.01 ||
+          (correctTP !== null && Math.abs(correctTP - levels.takeProfit1) > 0.01)) {
+        logger.info(
+          `🔧 Adjusting bracket to fill price $${order.price.toFixed(2)}: ` +
+          `SL $${levels.stopLoss.toFixed(2)} → $${correctStopLoss.toFixed(2)}` +
+          (correctTP !== null ? `, TP $${levels.takeProfit1.toFixed(2)} → $${correctTP.toFixed(2)}` : '')
+        );
+      }
+
+      // Both legs go in one request and are then read back from Oanda. These resting orders are
+      // the whole exit strategy, so "the modify call did not throw" is not good enough evidence
+      // that they are actually in place at the intended prices.
+      const bracket = await this.ensureBracket(order.tradeId, correctStopLoss, correctTP);
+
+      // Track what the broker really holds, not what was requested — the monitor, the tracker
+      // and the Telegram notification should all describe the live position.
+      if (bracket.stopLoss !== null) {
+        levels.stopLoss = bracket.stopLoss;
+      }
+      if (bracket.takeProfit !== null) {
+        levels.takeProfit1 = bracket.takeProfit;
+        levels.takeProfit2 = bracket.takeProfit;
+      }
+
+      if (!bracket.verified) {
+        // The position is NOT naked unless stopLoss is null — the market order carried its own
+        // SL/TP and they are merely anchored to the pre-fill price, with drift bounded by
+        // MAX_ENTRY_DRIFT_PIPS. Closing the trade over that would turn a small discrepancy into
+        // a market exit, so hold the position and make the mismatch loud instead.
+        const actualSL = bracket.stopLoss !== null ? `$${bracket.stopLoss.toFixed(2)}` : 'NONE';
+        const actualTP = bracket.takeProfit !== null ? `$${bracket.takeProfit.toFixed(2)}` : 'NONE';
+        const wantTP = correctTP !== null ? `$${correctTP.toFixed(2)}` : 'none';
+
+        logger.error(
+          `❌ BRACKET UNVERIFIED on trade ${order.tradeId} — broker holds SL ${actualSL} / TP ${actualTP}, ` +
+          `intended SL $${correctStopLoss.toFixed(2)} / TP ${wantTP}. Reason: ${bracket.reason}`
+        );
+        if (bracket.stopLoss === null) {
+          logger.error(`🚨 NO STOP LOSS on trade ${order.tradeId} — position is UNPROTECTED, manual action required`);
+        }
+
+        if (this.telegramBot) {
           try {
-            await this.client.modifyTrade(order.tradeId, null, correctTP);
-            levels.takeProfit1 = correctTP;
-            levels.takeProfit2 = correctTP;
-          } catch (tpError) {
-            logger.warn(`Failed to adjust TP: ${tpError.message} - keeping original TP`);
+            await this.telegramBot.notifyError(
+              `⚠️ Bracket not confirmed on trade ${order.tradeId}\n\n` +
+              `Broker holds: SL ${actualSL} / TP ${actualTP}\n` +
+              `Intended: SL $${correctStopLoss.toFixed(2)} / TP ${wantTP}\n` +
+              `Reason: ${bracket.reason}\n\n` +
+              (bracket.stopLoss === null
+                ? `🚨 NO STOP LOSS — the position is unprotected. Check Oanda now.`
+                : `The position is protected, but off the intended levels.`)
+            );
+          } catch (telegramError) {
+            logger.warn(`Failed to send bracket alert: ${telegramError.message}`);
           }
         }
       }
@@ -1185,6 +1223,102 @@ class GoldTradingBot {
         }
       }
     }
+  }
+
+  /**
+   * Drive the broker-side bracket to the intended stop / take-profit and CONFIRM it landed.
+   *
+   * Under bracket exit the resting stop and take-profit ARE the entire exit strategy, so an
+   * adjustment that quietly fails matters as much as one that never ran. Two ways it can:
+   * Oanda rejects a modification inside an HTTP 2xx response, or a transport error lands
+   * between the stop leg and the target leg and leaves a mismatched bracket — a fill-based
+   * stop against a target still anchored to the pre-fill analysis price.
+   *
+   * Read -> compare -> write -> re-read, so the call is idempotent (safe to retry, and a no-op
+   * when the bracket is already right) and the return value reports what the broker actually
+   * holds rather than what we asked for.
+   *
+   * @param {string} tradeId
+   * @param {number} intendedSL - required; a trade with no stop is treated as unverified
+   * @param {number|null} intendedTP - null in modes that run without a resting target
+   * @returns {Promise<{verified: boolean, stopLoss: number|null, takeProfit: number|null, reason: string|null}>}
+   */
+  async ensureBracket(tradeId, intendedSL, intendedTP) {
+    const TOLERANCE = 0.011;  // Oanda rounds prices to 2dp; one cent plus float slack
+    const ATTEMPTS = 3;
+
+    // A leg is wrong if it is missing, no longer resting, or sits off the intended price.
+    // An order that is CANCELLED or already TRIGGERED still appears on the trade but protects
+    // nothing, so treat anything but PENDING as absent.
+    const resting = (price, state) => price !== null && (state === null || state === 'PENDING');
+    const slOk = trade => resting(trade.stopLoss, trade.stopLossState) &&
+      Math.abs(trade.stopLoss - intendedSL) <= TOLERANCE;
+    const tpOk = trade => intendedTP === null ||
+      (resting(trade.takeProfit, trade.takeProfitState) &&
+        Math.abs(trade.takeProfit - intendedTP) <= TOLERANCE);
+
+    let lastError = null;
+    let actual = { stopLoss: null, takeProfit: null };
+
+    for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+      try {
+        const trade = await this.client.getTrade(tradeId);
+
+        if (!trade) {
+          return { verified: false, stopLoss: null, takeProfit: null, reason: `trade ${tradeId} not found on Oanda` };
+        }
+        if (trade.state !== 'OPEN') {
+          // Filled and exited already (an immediate stop-out, say). Nothing left to protect.
+          return { verified: true, stopLoss: trade.stopLoss, takeProfit: trade.takeProfit, reason: `trade already ${trade.state}` };
+        }
+
+        actual = { stopLoss: trade.stopLoss, takeProfit: trade.takeProfit };
+
+        if (slOk(trade) && tpOk(trade)) {
+          if (attempt > 1) {
+            logger.info(`✅ Bracket verified on attempt ${attempt}`);
+          }
+          return { verified: true, stopLoss: trade.stopLoss, takeProfit: trade.takeProfit, reason: null };
+        }
+
+        // Send both wrong legs in ONE request, so there is no window in which the stop is
+        // fill-based and the target is not.
+        await this.client.modifyTrade(
+          tradeId,
+          slOk(trade) ? null : intendedSL,
+          tpOk(trade) ? null : intendedTP
+        );
+      } catch (error) {
+        lastError = error.message;
+        logger.warn(`Bracket adjustment attempt ${attempt}/${ATTEMPTS} failed: ${error.message}`);
+      }
+
+      if (attempt < ATTEMPTS) {
+        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+      }
+    }
+
+    // The final attempt's write has not been read back yet — verify it before giving up.
+    try {
+      const trade = await this.client.getTrade(tradeId);
+      if (trade) {
+        actual = { stopLoss: trade.stopLoss, takeProfit: trade.takeProfit };
+        if (trade.state !== 'OPEN') {
+          return { verified: true, ...actual, reason: `trade already ${trade.state}` };
+        }
+        if (slOk(trade) && tpOk(trade)) {
+          return { verified: true, ...actual, reason: null };
+        }
+      }
+    } catch (error) {
+      lastError = `${lastError ? lastError + '; ' : ''}final verify read failed: ${error.message}`;
+    }
+
+    return {
+      verified: false,
+      ...actual,
+      reason: lastError || 'bracket still did not match the intended levels after retries'
+    };
   }
 
   /**

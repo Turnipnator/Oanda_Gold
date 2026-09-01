@@ -11,7 +11,8 @@
     "docker:build": "docker build -t gold-bot .",
     "docker:run": "docker-compose up -d",
     "docker:stop": "docker-compose down",
-    "docker:logs": "docker-compose logs -f"
+    "docker:logs": "docker-compose logs -f",
+    "test:bracket": "node tests/bracket.test.mjs"
   },
   "keywords": [
     "trading",

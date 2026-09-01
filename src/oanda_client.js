@@ -328,14 +328,59 @@ class OandaClient {
 
       const data = await this.makeRequest('PUT', `/v3/accounts/${this.accountId}/trades/${tradeId}/orders`, updates);
 
+      // Oanda answers a REJECTED modification with HTTP 2xx and a *OrderRejectTransaction in
+      // the body — nothing throws. Reporting that as success is how a trade ends up running on
+      // its pre-fill bracket while the log claims the adjustment worked. Demand the transaction
+      // we asked for, and surface the broker's own reason when it is missing.
+      const rejections = [];
+      if (stopLoss !== null && !data.stopLossOrderTransaction) {
+        rejections.push(`stopLoss: ${data.stopLossOrderRejectTransaction?.rejectReason || 'no stopLossOrderTransaction in response'}`);
+      }
+      if (takeProfit !== null && !data.takeProfitOrderTransaction) {
+        rejections.push(`takeProfit: ${data.takeProfitOrderRejectTransaction?.rejectReason || 'no takeProfitOrderTransaction in response'}`);
+      }
+      if (rejections.length > 0) {
+        throw new Error(`Modification rejected by Oanda - ${rejections.join('; ')}`);
+      }
+
       return {
         success: true,
         tradeId,
-        stopLoss: data.stopLossOrderTransaction?.price,
-        takeProfit: data.takeProfitOrderTransaction?.price
+        stopLoss: data.stopLossOrderTransaction ? parseFloat(data.stopLossOrderTransaction.price) : null,
+        takeProfit: data.takeProfitOrderTransaction ? parseFloat(data.takeProfitOrderTransaction.price) : null
       };
     } catch (error) {
       this.logger.error(`Failed to modify trade ${tradeId}: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Get a single trade by id, including its resting protective orders.
+   * Unlike getOpenTrades() this also resolves CLOSED trades, so it can confirm the state of a
+   * trade that filled and exited between calls.
+   */
+  async getTrade(tradeId) {
+    try {
+      const data = await this.makeRequest('GET', `/v3/accounts/${this.accountId}/trades/${tradeId}`);
+      const trade = data.trade;
+      if (!trade) return null;
+
+      return {
+        tradeId: trade.id,
+        state: trade.state,
+        instrument: trade.instrument,
+        units: parseInt(trade.currentUnits),
+        price: parseFloat(trade.price),
+        stopLoss: trade.stopLossOrder ? parseFloat(trade.stopLossOrder.price) : null,
+        takeProfit: trade.takeProfitOrder ? parseFloat(trade.takeProfitOrder.price) : null,
+        // A protective order can still be attached while no longer protecting anything —
+        // CANCELLED after a replacement, or FILLED/TRIGGERED on exit. Only PENDING is resting.
+        stopLossState: trade.stopLossOrder?.state || null,
+        takeProfitState: trade.takeProfitOrder?.state || null
+      };
+    } catch (error) {
+      this.logger.error(`Failed to get trade ${tradeId}: ${error.message}`);
       throw error;
     }
   }
