@@ -1,5 +1,7 @@
 > **Common Patterns**: See `~/trading-bot-skill.md` for deployment, Docker, Telegram, and strategy patterns shared across all trading bots.
 
+When asked to do research or strategy analysis, first read RESEARCH.md and follow the protocol within it.
+
 ---
 
 # Gold Trading Bot - Claude Project Guide
@@ -194,7 +196,7 @@ Gold trades heavily on **macroeconomic factors**. Your bot needs to be aware of 
 1. SENTIMENT: Bullish/Bearish/Neutral for gold prices
 2. IMPACT SCORE: 1-10 (how much will this move gold?)
 3. TIMEFRAME: Immediate / Short-term / Long-term effect
-4. TRADING RECOMMENDATION: 
+4. TRADING RECOMMENDATION:
    - Should we enter new positions?
    - Should we exit current positions?
    - Should we tighten stops?
