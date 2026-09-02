@@ -40,9 +40,15 @@ function formatConfidence(value) {
   return `${pct.toFixed(0)}%`;
 }
 
+// A single failed position-monitor cycle (Oanda's sporadic 401/503 on the 60s poll) is transient
+// and self-heals on the next cycle, so it is logged at warn. Escalate to error only once this many
+// consecutive cycles have failed - at that point an open position may genuinely be unmonitored.
+const MONITOR_FAILURE_ESCALATE_AFTER = 3;
+
 class GoldTradingBot {
   constructor() {
     this.isRunning = false;
+    this.monitorConsecutiveFailures = 0; // consecutive monitorPositions() cycles that threw
     this.startTime = null;
     this.logger = logger;
 
@@ -1674,8 +1680,15 @@ class GoldTradingBot {
         }
       }
 
+      this.monitorConsecutiveFailures = 0;
     } catch (error) {
-      logger.error(`Error monitoring positions: ${error.message}`);
+      this.monitorConsecutiveFailures++;
+      const n = this.monitorConsecutiveFailures;
+      if (n >= MONITOR_FAILURE_ESCALATE_AFTER) {
+        logger.error(`Error monitoring positions (${n} consecutive cycles): ${error.message}`);
+      } else {
+        logger.warn(`Position monitor cycle failed (${n}/${MONITOR_FAILURE_ESCALATE_AFTER}, transient - retrying in 60s): ${error.message}`);
+      }
     }
   }
 

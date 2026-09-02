@@ -300,7 +300,9 @@ class OandaClient {
         takeProfit: trade.takeProfitOrder ? parseFloat(trade.takeProfitOrder.price) : null
       }));
     } catch (error) {
-      this.logger.error(`Failed to get open trades: ${error.message}`);
+      // Rethrown - the caller decides severity. The position monitor only escalates to error
+      // after consecutive failed cycles, so a single transient Oanda 401/503 stays at warn.
+      this.logger.warn(`Failed to get open trades: ${error.message}`);
       throw error;
     }
   }

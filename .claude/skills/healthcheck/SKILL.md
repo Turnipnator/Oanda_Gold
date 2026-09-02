@@ -42,6 +42,11 @@ ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "docker ps --format '{{.Names}}
   handled gracefully and logged at `warn`. They come in bursts and are harmless. Only escalate if
   they coincide with a watchdog restart or stop the 15-min scan / 60-s position monitor from
   logging. The signal to hunt for is `error`-level lines and the order rejections below.
+- **Also non-fatal (since Sep 2 2026):** `Position monitor cycle failed (n/3, transient - retrying
+  in 60s)` at `warn` is a single Oanda 401/503 on the 60-s monitor. They cluster near
+  00:00/04:00/09:00 UTC and self-heal on the next cycle. The companion `Failed to get open trades`
+  line is also `warn` now. It escalates to the error-level `Error monitoring positions (N consecutive
+  cycles)` only after 3 straight failed cycles - THAT one matters, especially with a trade open.
 - **Logs rotate** (`gold_bot.log` → `gold_bot1..4.log`, ~11 MB each). Greps target the current
   `gold_bot.log`; widen to the rotations only when chasing something older than the live file.
 
