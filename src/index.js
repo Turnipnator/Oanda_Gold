@@ -16,6 +16,7 @@ import EmaTrendStrategy from './ema_trend_strategy.js';
 import RiskManager from './risk_manager.js';
 import GoldTelegramBot from './telegram_bot.js';
 import StrategyTracker from './strategy_tracker.js';
+import { formatConfidence } from './format.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -25,25 +26,14 @@ const DATA_DIR = process.env.NODE_ENV === 'production' ? '/app/data' : path.join
 const POSITIONS_FILE = path.join(DATA_DIR, 'active_positions.json');
 const COOLDOWN_FILE = path.join(DATA_DIR, 'trade_cooldown.json');
 
-/**
- * Render a strategy confidence as a percentage string.
- *
- * The strategies disagree on scale: EMA Trend clamps to a 0-1 fraction while
- * Breakout + ADX returns whole percents (80). Printing either one raw next to a
- * literal '%' was wrong for one of them - an EMA Trend signal logged as "0.8%"
- * when it meant 80%. Values at or below 1 are treated as fractions; anything
- * larger is already a percentage.
- */
-function formatConfidence(value) {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return 'n/a';
-  const pct = value <= 1 ? value * 100 : value;
-  return `${pct.toFixed(0)}%`;
-}
-
 // A single failed position-monitor cycle (Oanda's sporadic 401/503 on the 60s poll) is transient
 // and self-heals on the next cycle, so it is logged at warn. Escalate to error only once this many
 // consecutive cycles have failed - at that point an open position may genuinely be unmonitored.
 const MONITOR_FAILURE_ESCALATE_AFTER = 3;
+// Once escalated, keep the error-level line for cycle 3 and every Nth cycle after it. Oanda's
+// Friday-night maintenance window returns 503 for ~100 minutes, which used to write ~100 error
+// lines for one event; the cycles in between still log at warn so the live log shows continuity.
+const MONITOR_FAILURE_ERROR_EVERY = 10;
 
 class GoldTradingBot {
   constructor() {
@@ -1680,14 +1670,20 @@ class GoldTradingBot {
         }
       }
 
+      if (this.monitorConsecutiveFailures >= MONITOR_FAILURE_ESCALATE_AFTER) {
+        logger.info(`Position monitor recovered after ${this.monitorConsecutiveFailures} failed cycles`);
+      }
       this.monitorConsecutiveFailures = 0;
     } catch (error) {
       this.monitorConsecutiveFailures++;
       const n = this.monitorConsecutiveFailures;
-      if (n >= MONITOR_FAILURE_ESCALATE_AFTER) {
+      if (n < MONITOR_FAILURE_ESCALATE_AFTER) {
+        logger.warn(`Position monitor cycle failed (${n}/${MONITOR_FAILURE_ESCALATE_AFTER}, transient - retrying in 60s): ${error.message}`);
+      } else if (n === MONITOR_FAILURE_ESCALATE_AFTER || n % MONITOR_FAILURE_ERROR_EVERY === 0) {
         logger.error(`Error monitoring positions (${n} consecutive cycles): ${error.message}`);
       } else {
-        logger.warn(`Position monitor cycle failed (${n}/${MONITOR_FAILURE_ESCALATE_AFTER}, transient - retrying in 60s): ${error.message}`);
+        const nextReport = Math.ceil((n + 1) / MONITOR_FAILURE_ERROR_EVERY) * MONITOR_FAILURE_ERROR_EVERY;
+        logger.warn(`Position monitor still failing (${n} consecutive cycles, next error-level report at ${nextReport}): ${error.message}`);
       }
     }
   }

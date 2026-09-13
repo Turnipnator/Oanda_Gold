@@ -7,6 +7,7 @@
  * - Daily/Weekly/Monthly comparison reports
  */
 import logger from './logger.js';
+import { formatConfidence } from './format.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -168,7 +169,7 @@ class StrategyTracker {
       this.hypotheticalTrades.set(trade.id, trade);
     }
 
-    logger.info(`${strategy.isLive ? '🟢 LIVE' : '📝 HYPOTHETICAL'} ${strategyName}: ${signal} at $${entryPrice.toFixed(2)} (Confidence: ${confidence}%)`);
+    logger.info(`${strategy.isLive ? '🟢 LIVE' : '📝 HYPOTHETICAL'} ${strategyName}: ${signal} at $${entryPrice.toFixed(2)} (Confidence: ${formatConfidence(confidence)})`);
 
     // Persist changes
     this.save();

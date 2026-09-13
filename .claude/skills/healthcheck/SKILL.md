@@ -31,6 +31,16 @@ ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "docker ps --format '{{.Names}}
   alert: `BRACKET UNVERIFIED` (bracket is off the intended levels — position still protected) and
   `NO STOP LOSS` (position is genuinely unprotected — act immediately, check Oanda by hand).
   Neither has fired yet; the first occurrence is a real incident, not noise.
+  `✅ Bracket verified on attempt 2` is the NORMAL happy path, not a retry: attempt 1 reads the
+  on-fill (signal-price) levels, finds them off, and writes the fill-based levels in one request;
+  attempt 2 re-reads and confirms. Only a `Bracket adjustment attempt n/3 failed` warn is a real retry.
+- **Stop filled past its level?** For every `STOP_LOSS_ORDER` exit compare the tracker's `exitPrice`
+  to `stopLoss`. More than ~$2 adverse = a gap. Check the clock against NFP (13:30 UK, first Friday),
+  CPI (13:30 UK) and FOMC (19:00 UK) BEFORE suspecting the bracket — Sep 4 2026 was a $28 NFP gap
+  through a verified stop (−2.40R). The bot has NO calendar filter by DECISION: a 25-month replay with
+  real S5 fills (research_notes Part 8, Sep 4 2026) found trades open across releases hit TP 7 of 9,
+  flattening before releases costs 0.08R/trade, and the calendar covers 7% of shocks. Do not recommend
+  a calendar/flatten rule on the next gap loss; report the slippage and move on.
 - **Scan for ORDER REJECTIONS** — `BOUNDS_VIOLATION` (slippage guard rejecting fills),
   `INSUFFICIENT_MARGIN`, `MARKET_HALTED`. A burst of these around a trade means the bot
   fought to enter a fast-moving market — correlate with the next fill's outcome.
@@ -47,6 +57,12 @@ ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "docker ps --format '{{.Names}}
   00:00/04:00/09:00 UTC and self-heal on the next cycle. The companion `Failed to get open trades`
   line is also `warn` now. It escalates to the error-level `Error monitoring positions (N consecutive
   cycles)` only after 3 straight failed cycles - THAT one matters, especially with a trade open.
+  Since Sep 13 2026 the error line repeats only at cycle 3 and every 10th cycle after (10, 20, ...);
+  the cycles in between log `Position monitor still failing (N consecutive cycles ...)` at `warn`, and
+  recovery logs `Position monitor recovered after N failed cycles` at `info`. So a 100-minute outage
+  is ~10 error lines, not ~100. **Oanda's Friday-night maintenance** (`System under maintenance` 503
+  from ~21:45 UTC for ~100 min after the Friday close) is the usual cause - benign when flat, scans
+  keep running because only the account endpoints are down, and the watchdog is untouched.
 - **Logs rotate** (`gold_bot.log` → `gold_bot1..4.log`, ~11 MB each). Greps target the current
   `gold_bot.log`; widen to the rotations only when chasing something older than the live file.
 

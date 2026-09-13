@@ -12,7 +12,8 @@
     "docker:run": "docker-compose up -d",
     "docker:stop": "docker-compose down",
     "docker:logs": "docker-compose logs -f",
-    "test:bracket": "node tests/bracket.test.mjs"
+    "test:bracket": "node tests/bracket.test.mjs",
+    "test:format": "node tests/format.test.mjs"
   },
   "keywords": [
     "trading",
