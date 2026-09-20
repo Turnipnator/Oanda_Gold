@@ -13,6 +13,7 @@
     "docker:stop": "docker-compose down",
     "docker:logs": "docker-compose logs -f",
     "test:bracket": "node tests/bracket.test.mjs",
+    "test:sizing": "node tests/sizing.test.mjs",
     "test:format": "node tests/format.test.mjs"
   },
   "keywords": [
@@ -28,14 +29,15 @@
   "license": "MIT",
   "dependencies": {
     "@oanda/v20": "3.0.25-0",
-    "technicalindicators": "^3.1.0",
-    "node-cron": "^3.0.3",
-    "winston": "^3.11.0",
-    "dotenv": "^16.3.1",
     "axios": "^1.6.2",
-    "node-telegram-bot-api": "^0.64.0"
+    "dotenv": "^16.3.1",
+    "node-cron": "^3.0.3",
+    "node-telegram-bot-api": "^0.64.0",
+    "technicalindicators": "^3.1.0",
+    "winston": "^3.11.0"
   },
   "devDependencies": {
+    "fast-check": "4.10.2",
     "nodemon": "^3.0.2"
   },
   "engines": {

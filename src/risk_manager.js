@@ -150,16 +150,57 @@ class RiskManager {
     const riskAmount = this.currentBalance * riskPercent;
     const priceDistance = Math.abs(entryPrice - stopLoss);
 
+    // Fail closed on anything that is not a real number. `NaN === 0` is false,
+    // and Math.floor/max/min all PROPAGATE NaN, so an undefined price ran the
+    // whole way through sizing, past `if (positionSize === 0)` at every call
+    // site, past canOpenTrade (NaN > limit is false, so "allowed"), and into
+    // oanda_client.placeMarketOrder as `units.toString()` === "NaN".
+    // 0 is the failure signal every caller already checks.
+    // Validate the ARGUMENTS, not just what they compute to. JavaScript coerces
+    // null to 0 in arithmetic, so a missing stopLoss made `entry - null` a
+    // perfectly finite number and sized the trade as though the stop sat at
+    // price zero — a stop distance of the entire gold price. Number.isFinite
+    // rejects null, undefined and strings without coercing any of them.
+    if (![entryPrice, stopLoss, this.currentBalance, riskPercent].every(Number.isFinite)
+        || !Number.isFinite(riskAmount) || !Number.isFinite(priceDistance)) {
+      this.logger.error(
+        'Position sizing got a non-finite input — refusing to size: ' +
+        `entry=${entryPrice}, stop=${stopLoss}, balance=${this.currentBalance}, risk%=${riskPercent}`
+      );
+      return 0;
+    }
+
     if (priceDistance === 0) {
       this.logger.error('Price distance to stop loss is zero');
       return 0;
     }
 
     // Position Size = Risk Amount / Distance to Stop Loss
-    let positionSize = Math.floor(riskAmount / priceDistance);
+    const riskBasedSize = Math.floor(riskAmount / priceDistance);
+
+    // The broker minimum is a floor on what CAN be traded, not a licence to
+    // exceed the risk budget. Applying it after the division silently
+    // multiplied the risk: on 25 Jun 2026, with MIN_POSITION_SIZE at 100, the
+    // log reads `Risk=$438.72, Distance=$32.90, Size=100 units` — a 13-unit
+    // risk-based size inflated to 100, putting $3,290 at risk against a $438
+    // budget. 7.5x, and six such trades that fortnight at 5.5-7.5x each.
+    // Skip the trade instead — the rule the IG bot uses in the same spot.
+    // Dormant at today's config (MIN 10, stop capped at $20, budget ~£435, so
+    // the risk-based size never falls below 21): this is the guard for the
+    // next time the minimum is raised or the balance falls.
+    const minSizeRisk = Config.MIN_POSITION_SIZE * priceDistance;
+    if (riskBasedSize < Config.MIN_POSITION_SIZE && minSizeRisk > riskAmount) {
+      this.logger.risk('Minimum position size would exceed the risk budget — skipping trade', {
+        riskBudget: riskAmount.toFixed(2),
+        riskAtMinimumSize: minSizeRisk.toFixed(2),
+        minPositionSize: Config.MIN_POSITION_SIZE,
+        priceDistance: priceDistance.toFixed(2)
+      });
+      return 0;
+    }
 
     // Apply min/max limits
-    positionSize = Math.max(positionSize, Config.MIN_POSITION_SIZE);
+    let positionSize = Math.max(riskBasedSize, Config.MIN_POSITION_SIZE);
     positionSize = Math.min(positionSize, Config.MAX_POSITION_SIZE);
 
     this.logger.info(`Position sizing: Risk=$${riskAmount.toFixed(2)}, Distance=$${priceDistance.toFixed(2)}, Size=${positionSize} units`);
@@ -215,6 +256,18 @@ class RiskManager {
     const currentHeat = await this.calculatePortfolioHeat();
     const newTradeRisk = Math.abs(entryPrice - stopLoss) * positionSize;
     const newHeat = (currentHeat * this.currentBalance + newTradeRisk) / this.currentBalance;
+
+    // Defence in depth: every comparison against NaN is false, so a garbage
+    // trade sailed through the heat check reporting "allowed". Sizing now
+    // refuses non-finite inputs before this point, but a gate that cannot say
+    // no to a number it does not understand is not a gate.
+    if (![entryPrice, stopLoss, positionSize].every(Number.isFinite)
+        || !Number.isFinite(newHeat) || !Number.isFinite(newTradeRisk)) {
+      this.logger.risk('Portfolio heat is not a finite number — blocking trade', {
+        entryPrice, stopLoss, positionSize, currentHeat, balance: this.currentBalance
+      });
+      return { allowed: false, reason: 'NON_FINITE_RISK' };
+    }
 
     if (newHeat > Config.MAX_PORTFOLIO_RISK) {
       this.logger.risk('Portfolio heat too high', {
