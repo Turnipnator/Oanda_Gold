@@ -56,9 +56,13 @@ const propAsync = async (name, arbitraries, predicate) => {
   } catch (e) { report(name, e); }
 };
 
-function manager(balance) {
+function manager(balance, lossFactor = 1.0) {
   const rm = new RiskManager(silent, null);
   rm.currentBalance = balance;
+  // Quote -> account currency. Live is ~0.754 (USD loss -> GBP); tests drive
+  // the whole plausible range, and 1.0 is the pre-conversion behaviour.
+  rm.homeLossFactor = lossFactor;
+  rm.homeFactorAt = Date.now();
   return rm;
 }
 
@@ -80,21 +84,55 @@ const balance = fc.double({ min: 100, max: 500000, noNaN: true });
 const riskPct = fc.double({ min: 0.001, max: 0.05, noNaN: true });
 const minSize = fc.integer({ min: 1, max: 500 });
 const nonFinite = fc.constantFrom(NaN, Infinity, -Infinity, undefined, null, 'x');
+// Quote -> account currency. Live USD->GBP loss factor is ~0.754; generated wide
+// enough to cover a different account currency or a different instrument.
+const fxFactor = fc.double({ min: 0.3, max: 3, noNaN: true });
+
+// The stop is passed as a PRICE, so the distance the code sees is
+// |p - (p - d)|, which floating point does not always return as d exactly
+// (500 - 0.25000000000000006 rounds to 499.75). Oracles must use the distance
+// the function actually received, or they fail on arithmetic rather than logic.
+const seenDistance = (p, d) => Math.abs(p - (p - d));
 
 section('sizing never exceeds the risk budget');
 
-prop('a sized trade never risks more than the budget', [price, distance, balance, riskPct, minSize],
-  (p, d, bal, pct, min) => withLimits(min, 50000, () => {
-    const size = manager(bal).calculatePositionSize(p, p - d, pct);
+prop('a sized trade never risks more than the budget, IN ACCOUNT CURRENCY',
+  [price, distance, balance, riskPct, minSize, fxFactor],
+  (p, d, bal, pct, min, fx) => withLimits(min, 50000, () => {
+    const size = manager(bal, fx).calculatePositionSize(p, p - d, pct);
     if (size === 0) return true;                       // refused: nothing at risk
-    return size * d <= bal * pct + 1e-9;               // THE invariant the 7.5x breach violated
+    // size * d is a QUOTE-currency loss; the budget is the account currency.
+    // Comparing them unconverted is the bug this property now states away.
+    return size * seenDistance(p, d) * fx <= bal * pct + 1e-9;
   }));
 
-prop('a sized trade respects both broker limits', [price, distance, balance, riskPct, minSize],
-  (p, d, bal, pct, min) => withLimits(min, 50000, () => {
-    const size = manager(bal).calculatePositionSize(p, p - d, pct);
+prop('a sized trade respects both broker limits', [price, distance, balance, riskPct, minSize, fxFactor],
+  (p, d, bal, pct, min, fx) => withLimits(min, 50000, () => {
+    const size = manager(bal, fx).calculatePositionSize(p, p - d, pct);
     return size === 0 || (size >= min && size <= 50000);
   }));
+
+prop('a factor of 1.0 reproduces the pre-conversion numbers exactly',
+  [price, distance, balance, riskPct],
+  (p, d, bal, pct) => {
+    const size = withLimits(1, 50000, () => manager(bal, 1.0).calculatePositionSize(p, p - d, pct));
+    // A refused trade is the min-size rule, covered by its own property above;
+    // this one is about conversion being NEUTRAL when no conversion is needed.
+    const dd = seenDistance(p, d);
+    return size === 0 || size === Math.min(Math.max(Math.floor((bal * pct) / dd), 1), 50000);
+  });
+
+prop('a stale or unusable factor falls back to 1.0 rather than to nonsense',
+  [price, distance, balance, riskPct, fc.constantFrom(NaN, 0, -1, undefined)],
+  (p, d, bal, pct, broken) => {
+    const rm = manager(bal, 1.0);
+    rm.homeLossFactor = broken;                        // never fetched, or a bad payload
+    rm.homeFactorAt = 0;                               // and stale
+    const size = withLimits(1, 50000, () => rm.calculatePositionSize(p, p - d, pct));
+    const dd = seenDistance(p, d);
+    return Number.isInteger(size) && size >= 0
+        && (size === 0 || size === Math.min(Math.max(Math.floor((bal * pct) / dd), 1), 50000));
+  });
 
 prop('size is always a whole number of units', [price, distance, balance, riskPct],
   (p, d, bal, pct) => {
@@ -109,6 +147,23 @@ prop('a wider stop never buys a bigger position', [price, distance, distance, ba
     const a = rm.calculatePositionSize(p, p - near, pct);
     const b = rm.calculatePositionSize(p, p - far, pct);
     return b === 0 || a === 0 || b <= a;
+  });
+
+await propAsync('portfolio heat scales with the conversion factor',
+  [price, distance, balance, fc.integer({ min: 1, max: 40 })],
+  async (p, d, bal, units) => {
+    // Metamorphic rather than recomputed: doubling the factor must double the
+    // heat. An unconverted heat calculation ignores the factor entirely, which
+    // is how it read ~25% low against MAX_PORTFOLIO_RISK.
+    const openTrades = [{ price: p, stopLoss: p - d, units }];
+    const heatAt = async (fx) => {
+      const rm = manager(bal, fx);
+      rm.client = { getOpenTrades: async () => openTrades };
+      return rm.calculatePortfolioHeat();
+    };
+    const single = await heatAt(1);
+    const double = await heatAt(2);
+    return Math.abs(double - 2 * single) <= 1e-9 * Math.max(1, double);
   });
 
 section('garbage in, refusal out');

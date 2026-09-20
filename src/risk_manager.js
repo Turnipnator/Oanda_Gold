@@ -15,6 +15,12 @@ const DATA_DIR = process.env.NODE_ENV === 'production' ? '/app/data' : path.join
 const STATS_FILE = path.join(DATA_DIR, 'trading_stats.json');
 
 class RiskManager {
+  // How long a cached FX conversion factor stays usable. Long, because the
+  // fallback is worse than a slightly old rate: GBP/USD does not move far
+  // enough in a day to matter next to a 25% currency error, and refusing to
+  // trade on a stale rate would be a self-inflicted outage.
+  static HOME_FACTOR_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+
   constructor(logger, oandaClient) {
     this.logger = logger;
     this.client = oandaClient;
@@ -34,6 +40,13 @@ class RiskManager {
 
     this.initialBalance = Config.INITIAL_BALANCE;
     this.currentBalance = Config.INITIAL_BALANCE;
+
+    // Quote currency -> account currency, for LOSSES. XAU_USD risk is a USD
+    // price-notional; the account is GBP. Refreshed beside the balance; 1.0
+    // until the first successful fetch, which is what the code did implicitly
+    // before this existed (it under-risks, so it is the safe direction).
+    this.homeLossFactor = 1.0;
+    this.homeFactorAt = 0;
 
     // Load persisted stats on startup
     this.loadStats();
@@ -132,11 +145,50 @@ class RiskManager {
       const balance = await this.client.getBalance();
       this.currentBalance = balance.nav; // Use NAV (includes unrealized P&L)
       this.logger.info(`Balance synced: $${this.currentBalance.toFixed(2)}`);
+      await this.refreshHomeConversion();
       return this.currentBalance;
     } catch (error) {
       this.logger.error(`Failed to sync balance: ${error.message}`);
       return this.currentBalance;
     }
+  }
+
+  /**
+   * Refresh the quote->account conversion factor. Rides the balance sync rather
+   * than being fetched per trade, so sizing stays synchronous and its three call
+   * sites are untouched.
+   */
+  async refreshHomeConversion() {
+    if (typeof this.client?.getHomeConversionFactors !== 'function') return this.homeLossFactor;
+    const factors = await this.client.getHomeConversionFactors();
+    if (factors && Number.isFinite(factors.loss) && factors.loss > 0) {
+      this.homeLossFactor = factors.loss;
+      this.homeFactorAt = Date.now();
+      this.logger.info(`FX: 1 ${factors.currency} of loss = ${factors.loss.toFixed(4)} account currency`);
+    } else {
+      this.logger.warn('Could not refresh the home conversion factor — keeping the last known value');
+    }
+    return this.homeLossFactor;
+  }
+
+  /**
+   * The factor to turn a quote-currency loss into an account-currency one.
+   *
+   * Falls back to 1.0 once the cached value is stale, with a warning. 1.0 is
+   * what the code did before conversion existed: it UNDER-states risk, so
+   * positions come out smaller, which is the direction to fail in. Failing
+   * closed instead would stop the bot trading through a pricing outage.
+   */
+  homeConversionFactor() {
+    const age = Date.now() - this.homeFactorAt;
+    if (Number.isFinite(this.homeLossFactor) && this.homeLossFactor > 0 && age <= RiskManager.HOME_FACTOR_MAX_AGE_MS) {
+      return this.homeLossFactor;
+    }
+    this.logger.warn(
+      `Home conversion factor is stale (${Math.round(age / 3_600_000)}h old) — sizing at 1.0, ` +
+      'which under-states risk in the account currency'
+    );
+    return 1.0;
   }
 
   /**
@@ -175,8 +227,16 @@ class RiskManager {
       return 0;
     }
 
+    // The budget is in the ACCOUNT currency; the stop distance is in the
+    // instrument's QUOTE currency. Dividing one by the other without converting
+    // meant "risk 0.5%" was really 0.36%: a 21-unit trade with a $20 stop loses
+    // $420, which is £317 of an £87k account, not the £435 configured. Convert
+    // the budget into quote currency first, then it divides by a quote distance.
+    const conversion = this.homeConversionFactor();
+    const riskInQuoteCurrency = riskAmount / conversion;
+
     // Position Size = Risk Amount / Distance to Stop Loss
-    const riskBasedSize = Math.floor(riskAmount / priceDistance);
+    const riskBasedSize = Math.floor(riskInQuoteCurrency / priceDistance);
 
     // The broker minimum is a floor on what CAN be traded, not a licence to
     // exceed the risk budget. Applying it after the division silently
@@ -188,11 +248,12 @@ class RiskManager {
     // Dormant at today's config (MIN 10, stop capped at $20, budget ~£435, so
     // the risk-based size never falls below 21): this is the guard for the
     // next time the minimum is raised or the balance falls.
-    const minSizeRisk = Config.MIN_POSITION_SIZE * priceDistance;
-    if (riskBasedSize < Config.MIN_POSITION_SIZE && minSizeRisk > riskAmount) {
+    const minSizeRisk = Config.MIN_POSITION_SIZE * priceDistance;   // quote currency
+    if (riskBasedSize < Config.MIN_POSITION_SIZE && minSizeRisk > riskInQuoteCurrency) {
       this.logger.risk('Minimum position size would exceed the risk budget — skipping trade', {
         riskBudget: riskAmount.toFixed(2),
-        riskAtMinimumSize: minSizeRisk.toFixed(2),
+        riskBudgetInQuote: riskInQuoteCurrency.toFixed(2),
+        riskAtMinimumSize: (minSizeRisk * conversion).toFixed(2),
         minPositionSize: Config.MIN_POSITION_SIZE,
         priceDistance: priceDistance.toFixed(2)
       });
@@ -203,7 +264,13 @@ class RiskManager {
     let positionSize = Math.max(riskBasedSize, Config.MIN_POSITION_SIZE);
     positionSize = Math.min(positionSize, Config.MAX_POSITION_SIZE);
 
-    this.logger.info(`Position sizing: Risk=$${riskAmount.toFixed(2)}, Distance=$${priceDistance.toFixed(2)}, Size=${positionSize} units`);
+    // Prefix kept verbatim: the sizing history is greppable back to June and
+    // that is how the 7.5x over-risk was found.
+    this.logger.info(
+      `Position sizing: Risk=$${riskAmount.toFixed(2)}, Distance=$${priceDistance.toFixed(2)}, ` +
+      `Size=${positionSize} units (fx ${conversion.toFixed(4)}, risk at stop ` +
+      `${(positionSize * priceDistance * conversion).toFixed(2)} account ccy)`
+    );
 
     return positionSize;
   }
@@ -224,7 +291,9 @@ class RiskManager {
         }
       }
 
-      const portfolioHeat = totalRisk / this.currentBalance;
+      // totalRisk is a QUOTE-currency notional; the balance is the account
+      // currency. Unconverted, heat read ~25% low against MAX_PORTFOLIO_RISK.
+      const portfolioHeat = (totalRisk * this.homeConversionFactor()) / this.currentBalance;
       return portfolioHeat;
     } catch (error) {
       this.logger.error(`Failed to calculate portfolio heat: ${error.message}`);
@@ -254,7 +323,10 @@ class RiskManager {
 
     // Check portfolio heat
     const currentHeat = await this.calculatePortfolioHeat();
-    const newTradeRisk = Math.abs(entryPrice - stopLoss) * positionSize;
+    // Converted for the same reason as calculatePortfolioHeat: this is a
+    // quote-currency notional being measured against an account-currency
+    // balance.
+    const newTradeRisk = Math.abs(entryPrice - stopLoss) * positionSize * this.homeConversionFactor();
     const newHeat = (currentHeat * this.currentBalance + newTradeRisk) / this.currentBalance;
 
     // Defence in depth: every comparison against NaN is false, so a garbage

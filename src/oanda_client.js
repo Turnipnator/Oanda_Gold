@@ -128,6 +128,40 @@ class OandaClient {
   }
 
   /**
+   * Home-conversion factors for an instrument's QUOTE currency.
+   *
+   * XAU_USD is priced in USD while this account is denominated in GBP, so a
+   * price distance ("$20 of gold") is not a risk figure until it is converted.
+   * OANDA publishes the factors itself and quotes gain and loss separately —
+   * they differ by ~2%, its conversion spread. Risk is a loss, so callers want
+   * `loss`.
+   *
+   * @returns {{currency: string, gain: number, loss: number}|null} null when no
+   *          factor is published for that currency (the home currency itself is
+   *          omitted) or the payload is unusable — callers decide the fallback.
+   */
+  async getHomeConversionFactors(instrument = Config.TRADING_SYMBOL) {
+    try {
+      const data = await this.makeRequest(
+        'GET',
+        `/v3/accounts/${this.accountId}/pricing?instruments=${instrument}&includeHomeConversions=true`
+      );
+      const quoteCurrency = instrument.split('_')[1];
+      const row = (data.homeConversions || []).find(h => h.currency === quoteCurrency);
+      if (!row) return null;
+
+      const gain = parseFloat(row.accountGain);
+      const loss = parseFloat(row.accountLoss);
+      if (!Number.isFinite(gain) || !Number.isFinite(loss) || gain <= 0 || loss <= 0) return null;
+
+      return { currency: quoteCurrency, gain, loss };
+    } catch (error) {
+      this.logger.error(`Failed to get home conversion factors for ${instrument}: ${error.message}`);
+      return null;
+    }
+  }
+
+  /**
    * Get historical candles
    * @param {string} instrument - Instrument name (e.g., XAU_USD)
    * @param {string} granularity - Candle granularity (e.g., H4 for 4-hour)
