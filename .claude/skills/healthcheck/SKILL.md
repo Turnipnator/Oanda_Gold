@@ -134,11 +134,11 @@ ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "docker stats gold-trading-bot 
 - Check that EMA Trend config matches expectations (fast EMAs, ATR multipliers, R:R)
 
 ```bash
-ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "docker exec gold-trading-bot env | grep -E 'STRATEGY|EMA_TREND|LEG_FILTER|ALLOW_SHORT|TRAILING|TAKE_PROFIT|BREAKOUT_STOP|TRADE_COOLDOWN|TRADING_START|TRADING_END' | sort"
+ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "docker exec gold-trading-bot env | grep -E 'STRATEGY|EMA_TREND|LEG_FILTER|ALLOW_SHORT|TRAILING|TAKE_PROFIT|BREAKOUT_STOP|TRADE_COOLDOWN|TRADING_START|TRADING_END|CONFIG_REGIME|RISK|POSITION_SIZE' | sort"
 ```
 
-Expected current values — **BRACKET-EXIT regime, deployed Jul 10 2026** (flag any drift):
-- `STRATEGY_TYPE=ema_trend`, `ALLOW_SHORT=true`, `CONFIG_REGIME=bracket-jul10`
+Expected current values — **BRACKET-EXIT regime (Jul 10 2026), risk raised Sep 21 2026** (flag any drift):
+- `STRATEGY_TYPE=ema_trend`, `ALLOW_SHORT=true`, `CONFIG_REGIME=bracket-jul10-risk1pct`
 - **Exit (the whole point of this regime):** `ENABLE_TRAILING_STOP=false`, `EMA_TREND_BE_TRIGGER_PCT=0`,
   `EMA_TREND_TP_RR=2.0`. Trail and breakeven are BOTH off so the resting 2R TP can fire.
   `TRAILING_STOP_DISTANCE_PIPS=150` is still set but INERT — ignore it, do not "fix" it.
@@ -146,11 +146,23 @@ Expected current values — **BRACKET-EXIT regime, deployed Jul 10 2026** (flag 
   `EMA_TREND_ADX_MIN=20`, `EMA_TREND_RSI_SELL_MIN=45`, `EMA_TREND_MAX_SL=2000` ($20 cap)
 - `EMA_TREND_LEG_FILTER_ENFORCE=true`, `EMA_TREND_LEG_FILTER_THRESHOLD=2.0`
 - `EMA_TREND_ATR_SL_MULT=1.5`, `TRADE_COOLDOWN_HOURS=2`
-- **Sizing:** `MIN_POSITION_SIZE=10` (was 100 — the floor that caused the £1,818 outlier),
-  `MAX_RISK_PER_TRADE=0.005`. At a $20 stop this yields ~21 units ≈ £433 risk. Flag if size
-  is pinned at the floor again.
+- **Sizing (CHANGED Sep 21 2026 — do NOT flag as drift):** `MIN_POSITION_SIZE=10` (was 100 —
+  the floor that caused the £1,818 outlier), **`MAX_RISK_PER_TRADE=0.01`** (was 0.005). At a $20
+  stop this yields **~57 units ≈ £861 risk**. Flag if size is pinned at the floor again.
+  Two things moved together that day: the config doubled the risk, AND the long-undeployed FX
+  fix (`713ef5b`) shipped — the bot had been dividing a GBP budget by a USD stop distance, so
+  `0.005` was really risking 0.36%. Combined effect **21u → 57u, £317 → £861 per 1R (2.7×)**.
+- **⚠️ £ SCALE BREAK at Sep 21 2026.** R, PF, win rate and TP-rate are currency-free and pool
+  across the date unchanged — **only £ breaks**. Never add a post-Sep-21 £ to a pre-Sep-21 total.
+  The regime tag keeps the `bracket-jul10` prefix deliberately: prefix-match to pool R stats,
+  exact-match to separate the £ scale.
+- **Startup FX line is a required check:** logs must show `FX: 1 USD of loss = 0.7xxx account
+  currency`. If it is missing or warns "stale", sizing silently falls back to 1.0 and under-risks
+  by ~25%. `grep -a 'FX:' /root/Oanda_Gold/logs/gold_bot.log | tail -2`
 
-⚠️ Rollback for this regime: `/root/Oanda_Gold/.env.bak-20260710-bracket` then `docker compose up -d`.
+⚠️ Rollbacks (then `docker compose up -d` — **never** `restart`, it does not re-read `.env`):
+- risk 1.0% → 0.5% only: `/root/Oanda_Gold/.env.bak-20260921-risk1pct`
+- whole bracket regime: `/root/Oanda_Gold/.env.bak-20260710-bracket`
 
 These live in THREE places (config.js default, docker-compose.yml `${VAR:-default}`, VPS `.env`
 override) — a value can be correct in one and wrong in the container. The `env` output above
@@ -163,21 +175,27 @@ is the source of truth for what's actually running.
 
 ## 8. STRATEGY EDGE ASSESSMENT
 
-> ⏰ **POST-CHANGE VALIDATION TRIGGER (set Jun 1 2026).** Baseline EMA Trend trade count was
-> **22** when three changes shipped (leg filter enforced @2.0×, breakeven monotonic-trail fix,
-> pre-BE trail $0.75→$1.50). **When the count reaches ~37–42 (15–20 new trades), RUN THE
-> VALIDATION REVIEW and report it prominently:**
-> - Split trades at the Jun 1 baseline (id/time) → compare PF, win rate, avg win, payoff before vs after.
-> - **Leg filter:** any trade that fired despite a `WOULD BLOCK` log? Compare blocked-vs-allowed P&L (`legWouldBlock`). Is it still removing losers not winners?
-> - **BE fix:** are the $0 give-back-to-breakeven scratches gone?
-> - **Trail $1.50:** did avg win rise vs the old ~$212? What's the `TAKE_PROFIT`-hit rate now?
-> - **Verdict:** did PF move off 1.11? If the three changes held → this is the green light to revisit risk sizing (the MIN_POSITION_SIZE floor / 0.5%-vs-0.9%) and prep go-live. If not → diagnose before real money.
+> ✅ **The Jun-1 2026 validation trigger is CLOSED** (run Jul 29 2026 at n=37 — PF did not move
+> off ~1.1, but the failure was fully explained by the trail capping winners, which the Jul-10
+> bracket change fixes). Do NOT re-run it; it is superseded by the trigger below.
+>
+> ⏰ **LIVE TRIGGER — BRACKET-ERA VALIDATION (n ≥ 20).** Count only trades whose `regime` starts
+> `bracket-jul10`. **As of Sep 21 2026 that is 6** (3W/3L, net +£432, +1.63R, PF 1.30, 3 of 6 at
+> the 2R TP). At ~3 trades/month, n=20 lands around **Feb 2027**. Until then, report the number
+> but **do not draw a verdict** — PF on n<20 is noise. When it fires:
+> - PF, win rate, payoff and **mean R** across the bracket era (R pools across the Sep-21 £ break, £ does not).
+> - **TP-hit rate vs 33.3%** — that is the breakeven rate for a 2R target. Above it = edge, at it = chance.
+> - **Leg filter:** any trade that fired despite `legWouldBlock=true`? (Zero so far.)
+> - **Shorts:** all 6 bracket trades are LONG. Has a short finally fired? The regime is untested short-side.
+> - **Verdict:** if PF holds >1.3 with the TP rate above 33.3%, that is the green light to prep
+>   go-live. If not → diagnose before real money. Do NOT tune exits to close a gap ([[exit-config-not-the-lever]]).
 
 Use the per-strategy tracker (NOT just trading_stats.json — that blends all strategies and
 includes pre-bot history). Pull the live strategy's own trades and compute the edge:
 ```bash
 ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "docker exec gold-trading-bot cat /app/data/tracker_data.json" > /tmp/tracker.json
-node -e 'const d=JSON.parse(require("fs").readFileSync("/tmp/tracker.json"));const t=(d.strategies[d.liveStrategy].trades||[]).filter(x=>typeof x.pnl==="number");const w=t.filter(x=>x.pnl>0),l=t.filter(x=>x.pnl<=0);const s=a=>a.reduce((p,x)=>p+x.pnl,0);console.log(`${d.liveStrategy}: ${t.length} trades, ${w.length}W/${l.length}L (${(100*w.length/t.length).toFixed(0)}%), avgW $${(s(w)/w.length).toFixed(0)}, avgL $${(s(l)/l.length).toFixed(0)}, PF ${(s(w)/Math.abs(s(l))).toFixed(2)}, net $${s(t).toFixed(0)}`)'
+# P&L is real broker GBP, not USD. Segment by regime — ALL-TIME pools incompatible exit eras and is meaningless.
+node -e 'const d=JSON.parse(require("fs").readFileSync("/tmp/tracker.json"));const all=(d.strategies[d.liveStrategy].trades||[]).filter(x=>typeof x.pnl==="number");const f=(t,lab)=>{if(!t.length)return console.log(lab+": none");const w=t.filter(x=>x.pnl>0),l=t.filter(x=>x.pnl<=0),s=a=>a.reduce((p,x)=>p+x.pnl,0),aw=w.length?s(w)/w.length:0,al=l.length?s(l)/l.length:0;const tp=t.filter(x=>/TAKE_PROFIT/.test(x.exitReason||"")).length;console.log(`${lab}: ${t.length} trades, ${w.length}W/${l.length}L (${(100*w.length/t.length).toFixed(0)}%), avgW GBP ${aw.toFixed(0)}, avgL GBP ${al.toFixed(0)}, payoff ${al?Math.abs(aw/al).toFixed(2):"-"}, PF ${(s(w)/Math.abs(s(l))).toFixed(2)}, net GBP ${s(t).toFixed(0)}, TP-rate ${(100*tp/t.length).toFixed(0)}% (vs 33.3% breakeven)`)};f(all,"ALL-TIME (do NOT read as edge)");f(all.filter(x=>String(x.regime||"").startsWith("bracket-jul10")),"BRACKET ERA  (the one that counts)")'
 ```
 
 - Win rate, profit factor, avg win vs avg loss (payoff ratio).
@@ -185,14 +203,24 @@ node -e 'const d=JSON.parse(require("fs").readFileSync("/tmp/tracker.json"));con
   ATR ~$14) exceeds the $20 `EMA_TREND_MAX_SL` cap, so most stops sit pinned at $20. That is
   intended: the cap bounds worst-case loss. (Historic note: the cap was $8 until Jun 25 2026 and
   the sizing floor was 100u — that combination is what produced the £1,818 outlier. Both are fixed.)
-- **POSITION-SIZE FLOOR — the real risk check.** Inspect a `Position sizing:` log line. Healthy
-  now looks like `Risk=$433, Distance=$20.00, Size=21 units` — i.e. genuinely risk-scaled, well
-  clear of the `MIN_POSITION_SIZE=10` floor. Flag only if size lands ON the floor, which would
-  mean actual $ risk exceeds `MAX_RISK_PER_TRADE` again.
+- **POSITION-SIZE FLOOR — the real risk check.** Inspect a `Position sizing:` log line. Since
+  Sep 21 2026 healthy looks like:
+  `Position sizing: Risk=$870.81, Distance=$20.00, Size=57 units (fx 0.7555, risk at stop 861.27 account ccy)`
+  — genuinely risk-scaled, well clear of the `MIN_POSITION_SIZE=10` floor, and carrying the `fx`
+  suffix that proves the conversion applied. Pre-Sep-21 lines read `Risk=$437, Distance=$20.00,
+  Size=21 units` with no `fx` suffix — that is the OLD regime, not a fault.
+  **Flag if:** size lands ON the floor (actual risk would exceed `MAX_RISK_PER_TRADE`), or the
+  `fx` suffix is absent on a new trade (conversion silently fell back to 1.0, under-risking ~25%).
+  Note the grep sorts by FILENAME, so `gold_bot4.log` (oldest rotation) lands last — read
+  `gold_bot.log` explicitly for the most recent line.
 - **Is 2:1 R:R actually realized?** Count `TAKE_PROFIT_ORDER` exits vs `STOP_LOSS_ORDER`. Under
   the pre-Jul-10 config the answer was 0/35 — the $1.50 trail always fired first
-  (see [[tp-never-reached-trail-preempts]]). **First TP hit Jul 22 2026: +£621, exactly 2.0R.**
+  (see [[tp-never-reached-trail-preempts]]). **Under bracket exit the TP fires: 3 of the first 6
+  (Jul 22 +£621, Aug 5 +£626, Aug 17 +£614), all within a few cents of exactly 2.0R on a $20 stop.**
   Bracket-era trades need ≥20 before PF means anything; expect ~3/month and holds of hours-to-days.
+- **Stop fills are clean — check, don't assume.** Jul 27 filled $0.04 past its level, Sep 17 $0.12.
+  The one exception is Sep 4 2026 at **$28.03** past a verified stop — the NFP print, already
+  investigated; see the calendar-filter DECISION in section 2 before proposing a fix.
 - **Leg-filter edge:** split trades by `legWouldBlock` and compare P&L of blocked vs allowed —
   confirms the filter is removing losers, not winners, out of sample.
 - **Breakeven exits working?** Look for SL-at-entry / small-profit trailing closures (not $0
