@@ -14,7 +14,8 @@
     "docker:logs": "docker-compose logs -f",
     "test:bracket": "node tests/bracket.test.mjs",
     "test:sizing": "node tests/sizing.test.mjs",
-    "test:format": "node tests/format.test.mjs"
+    "test:format": "node tests/format.test.mjs",
+    "test:reconcile": "node tests/reconcile.test.mjs"
   },
   "keywords": [
     "trading",

@@ -172,6 +172,10 @@ is the source of truth for what's actually running.
 - Spread conditions in recent trades
 - Account margin usage
 - Any requote or rejection issues
+- **Tracker ties to Oanda?** If a trade has closed since the last healthcheck, run steps 1–2 of the
+  `reconcile` skill (`node scripts/reconcile.mjs ...`) before quoting any stats in section 8. Report
+  the verdict line (P&L Δ, break count). #854/#872 exitTime are known standing breaks, so don't
+  re-flag them. Any **Oanda-only trade after tracking began** or an **open-position mismatch** is P1.
 
 ## 8. STRATEGY EDGE ASSESSMENT
 
