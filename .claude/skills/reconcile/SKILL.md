@@ -86,11 +86,10 @@ gets overwritten. The procedure is:
    (`totalPnL`, W/L counts, largest win/loss, drawdown) from `trades[]`, and verify by rerunning step 2.
 4. `docker compose up -d`, then rerun this skill. It must come back with the fixed breaks gone.
 
-## Known standing breaks (as of Sep 22 2026)
+## History
 
-- **#854 (Mar 26) and #872 (Mar 27) exitTime**: stamped 2026-04-09 10:50 by the Apr 9 manual
-  reconciliation, 13+ days after the real close. P&L, prices and exit reason all tie. Only
-  hold-time is wrong. Action: `fix-tracker` at the next safe window, or `accept`.
-
-Baseline at the first run (Sep 22 2026): 41/41 EMA Trend trades matched, closed P&L
-**−£1,300.33 on both sides (Δ £0.00)**, financing −£3.83, no missing or phantom trades.
+- **Sep 22 2026, first run:** 41/41 EMA Trend trades matched. Closed P&L was **−£1,300.33 on both
+  sides (Δ £0.00)**, financing −£3.83, with no missing or phantom trades. There were 2 breaks:
+  #854 and #872 had exitTime stamped 2026-04-09 by the Apr 9 manual reconciliation. **Fixed the same
+  night** (backup `data/tracker_data.json.bak-20260922-reconcile`), and the rerun came back **0 breaks**.
+  Any break from here on is new.
