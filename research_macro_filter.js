@@ -15,11 +15,13 @@
  * and was rejected for that reason.
  *
  * Env: MF_SP=<dir with DFII10.csv, *_D.json, *_H1.json, signals_d15.json>  MF_BOOT=2000
+ *      MF_FROM=2026-10-03 -> forward test: part B only, signals at/after that date, 5d only
  */
 import fs from 'fs';
 
 const SP = process.env.MF_SP;
 const NBOOT = parseInt(process.env.MF_BOOT || '2000');
+const FROM = process.env.MF_FROM || '';
 const FX = { EUR_USD: -0.576, USD_JPY: 0.136, GBP_USD: -0.119, USD_CAD: 0.091, USD_SEK: 0.042, USD_CHF: 0.036 };
 
 const nyDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' });
@@ -100,7 +102,7 @@ function partA(lookback) {
 // (B) the bot's signals
 // =====================================================================================
 function partB(lookbackDays) {
-  const sigs = JSON.parse(fs.readFileSync(`${SP}/signals_d15.json`)).filter(s => s.inSession);
+  const sigs = JSON.parse(fs.readFileSync(`${SP}/signals_d15.json`)).filter(s => s.inSession && s.time >= FROM);
   const dxy = dxySeries('H1');
   const bars = lookbackDays * 24;
   const out = [];
@@ -149,5 +151,10 @@ function partB(lookbackDays) {
   return out;
 }
 
-partA(5); partA(20);
-partB(5); partB(20);
+if (FROM) {
+  console.log(`FORWARD TEST — signals from ${FROM}, frozen 5d rules (research_notes.md Part 14)`);
+  partB(5);
+} else {
+  partA(5); partA(20);
+  partB(5); partB(20);
+}
