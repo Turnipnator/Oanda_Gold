@@ -1364,3 +1364,190 @@ barely matters; nothing here has standalone entry edge worth switching for.
   buy leverage far more cheaply by raising risk on a strategy whose edge is already the best measured.
 - Do NOT re-open the breakout family on a backtest number again. It has now been rejected three times
   (live 2026, Part 2 fidelity caveat, Part 12 live-refutation) and each backtest flattered it.
+
+---
+
+## Part 13 — A friend's "US30 NY open" 5-min opening-range breakout: is there an edge? (Oct 2 2026). Script: `research_orb_friend.js`.
+
+### Question
+A friend reports success with a checklist (titled "US30 NY open"): mark the 5-min range at the NY open, trade the
+break in the 5-min trend direction on the 1-min chart, SL 50 pips / TP 100 pips (close at 90–95%), BE at +50,
+one entry per day, done by 15:30. Does this have a measurable edge on **gold and US30**, and is it the rules or his discretion?
+
+Sub-questions: (1) Mechanical version profitable after Oanda bid/ask spread? (2) Does the trend filter add anything
+over a random-direction placebo? (3) Stable across both years? (4) How sensitive is it to interpretation of the
+ambiguous rules (range candle, trend definition, entry trigger, BE, cutoff)?
+
+Units confirmed by the user: on gold, $1 = 10 pips → SL $5, TP $10, BE at +$5. US30 assumed 1 pip = 1 index point.
+
+### Hypotheses
+- H1: Real edge — the NY-open breakout in trend direction has positive expectancy after costs.
+- H2: No mechanical edge — results are a hot streak / a trending year (gold bull 2025–26) / survivorship (we hear about the winners).
+- H3: Edge lives in the discretion (skipping "slow creeps", early exits near HTF zones) and is not capturable by rules.
+
+### Pre-registered primary spec (fixed before seeing results)
+Range = 09:25–09:30 ET candle (fits "no entry on 30th minute, wait for 31st"); entry = first 1-min close beyond the
+range from 09:31 ET, in the M5 EMA20/50 trend direction, filled at next minute open (ask/bid); SL 50 / TP 95 pips;
+BE at +50; flatten at 15:30 UK; one trade/day. Intrabar SL-before-TP (pessimistic). Everything else is a reported variant.
+
+### Data & method
+Oanda M1 bid/ask, Sep 2024 – Oct 2026 (~537 NY sessions per instrument). Longs buy ask / sell bid, so the spread is
+charged. SL-before-TP when both are hit in one minute (only 0–3 such trades per variant, so the ordering choice
+barely matters). Grid = range {A 09:30–35, B 09:25–30} × trend {M5 EMA20/50, close vs EMA200, swing HH/HL, none,
+counter} × entry {1-min close beyond, "pop" (break bar ≥1.5× avg range AND ≥1.5× avg volume, else stand aside),
+touch} × BE on/off × cutoff {15:30 UK, 15:30 ET} × TP {95,100} = 240 per instrument. Month-block bootstrap 90% CIs.
+
+### Evidence
+**Primary (pre-registered):** GOLD n=429, WR 31%, avgR **−0.047** [−0.16,+0.07], PF 0.91, Y1 +0.06 / Y2 −0.16.
+US30 n=424, avgR **+0.020** [−0.06,+0.10], PF 1.04. Neither is distinguishable from zero. The trend filter beats
+a random-direction placebo only 74% (gold) / 86% (US30) of the time, which is not significant.
+
+**Gold, all 192 interpretations: 13 positive, 0 with a CI above zero, median −0.096R.** The best (B/EMA200/close/noBE,
++0.093) is long-biased and decays to +0.01 in year 2 = drift. The "clean pop" filter HURTS on gold (−0.22R at 1.5×,
+−0.44R at 2×): big opening candles on gold mean-revert. A $5 stop ≈ the median $4.3 opening range, so most stops sit
+inside ordinary noise. **HIGH confidence: no mechanical edge on gold.**
+
+**US30: one candidate cluster, A / swing / pop (n=53, avgR +0.37, PF 2.28, CI [+0.12,+0.62]).** Checks it PASSED:
+positive at all 9 pop-threshold settings (+0.05…+0.37, smooth, not a spike); Y1 +0.28 / Y2 +0.58; 7 of 9 quarters
+positive; +13.1R without the best 3 trades; longs +0.48 AND shorts +0.27 (not drift); same days with forced long
++0.07 / forced short +0.01, so the swing direction adds ~0.3R; coin-flip reality check on best-of-192 p=0.005
+(gold p=0.03, but that one is drift). Checks it FAILED or can't pass: found post hoc; neighbours with EMA trend or no
+trend are ~0 (A/EMA20-50/pop +0.08, A/none/pop −0.09); only ~2 trades/month, so n is small; "pop" is my proxy for
+his judgement. **MEDIUM-LOW confidence**: a plausible candidate, not a proven edge.
+
+### Conclusion
+- H2 (no mechanical edge) is the most supported for **gold** and for the rules as literally written on US30.
+- H3 (the edge, if any, sits in the discretion) gets support on **US30 only**: the one surviving variant is the most
+  selective one, standing aside on "slow creep" breaks and taking only volume-backed pops in the swing-structure
+  direction, which matches his checklist. That is also why his live results could be real while the plain version is flat.
+- His good run is consistent with skill on US30 discretion OR a lucky streak. Neither the run nor this test proves which.
+
+### Next
+- Best evidence: his actual trade log (date, instrument, entry/exit). Compare it to the A/swing/pop days; overlap
+  plus a similar R profile would support H3.
+- Forward-test A/swing/pop on US30 out of sample (paper, from Oct 2026) before believing it; decide at n≥40.
+- Do NOT port this to the gold bot: gold fails on every interpretation.
+
+### Part 13b — Wider gold stops (user request, Oct 2 2026). `ORB_STOPS=XAU_USD` / `ORB_CHECK=...`
+Shape kept: TP = 1.9× stop, BE at +1× stop. Stops: fixed $5/$7.50/$10/$15/$20/$25; 1/1.5/2× the opening-range width;
+0.1/0.15/0.2/0.3× the prior-14-day average daily range (no look-ahead). 96 interpretations at each of 13 stops.
+
+- **Primary never turns positive in a meaningful way:** −0.05R ($5) → −0.03 ($10) → −0.04 ($15) → +0.01 ($20) → +0.02R ($25).
+  Wider stops only move it toward ZERO. With the 15:30 UK cutoff, 61–85% of trades at $15+ end on the clock, not at SL/TP:
+  a one-hour hold can't reach a $30–50 target, so the trade becomes "hold for an hour", which has ~0 expectancy.
+  Holding to 15:30 ET doesn't help (−0.04 to −0.00).
+- **Grid:** at most 3 of 96 with CI > 0 at any stop (≈ chance); median between −0.10 and 0.00 everywhere.
+- **The recurring "best" (B/EMA200/pop/noBE/hold to 15:30 ET, +0.14–0.17R, n≈125) is DRIFT:** at $20, forcing LONG on the
+  same days gives +0.146 vs the strategy's +0.144, so the trend direction contributes nothing. At 0.2× ADR: forced long +0.13
+  vs +0.17. The CI touches zero, and it's best-of-~1,250. At his $5 stop the same entries lose (−0.05).
+- **HIGH confidence: widening the stop does not create an edge on gold.** It turns a small loser into a scratch. The
+  NY-open break has no directional information on gold that a long bias in a bull market doesn't already explain.
+
+### Part 13c — Can the US30 candidate run on the IG bot? (Oct 2 2026)
+- **IG Wall Street (`IX.D.DOW.DAILY.IP`), live DEMO quote sampled 17:22 UK (US session):** spread **2.4 pts** (steady over 5
+  samples), min stop **12 pts**, min deal **£0.04/pt**. Oanda US30 at the open: median 2.5, p90 4.0. Same cash Dow (~51,000).
+- **Re-run of A/swing/pop/BE on a flat IG spread:** 2.4 → +0.374R (same as Oanda's +0.372); 4.0 → +0.41; 6.0 → +0.28 (CI still > 0).
+  Spread is ~0.05R against a 50-pt stop and is NOT the binding cost. The 15:30 cutoff matters more: flatten at 15:30 UK
+  (one hour) → +0.26R, CI touching zero; hold to 15:30 ET → +0.37R. Confirm with the friend which he means.
+- **Sizing:** a 50-pt stop at the £0.04 minimum = £2 risk; at 1% of a £10k account = £2/pt. No IG constraint binds.
+- **IG bot plumbing:** Wall St is already streamed (shadow_only since Aug 31, for momentum). Per-market candle intervals exist;
+  strategy "modes" (off/shadow/live) already exist for breakout, daily-trend and pullback, so an `orb` mode fits the
+  shadow-first pattern. Gaps: session gates are integer UTC hours (09:30 ET needs a minute-level, NY-tz clock); the
+  global S&P HTF direction gate and the `equity_index` cluster filter would interfere and need bypassing for ORB;
+  1-min bars for the trigger. Per the IG CLAUDE.md, this counts as order-path work → it needs the pre-flight and approval first.
+
+### Part 13d — IG port parity and a correction (Oct 2 2026)
+- The IG bot's Python port (`IG/src/orb.py`) reproduces this engine's decision on **every one of 522 non-holiday days**
+  (trend, side, entry, exit reason, R to 1e-3). The only 2 breaks in the first pass were **NYSE holidays** (Presidents' Day
+  2025-02-17, July 4 2025). Oanda's US30 trades thinly on those days, and this engine carried the July 4 trade into the next
+  session for **+2.81R**, an artifact.
+- **Corrected expectations, holidays excluded (15 in the sample):** pop variant **+0.306R/trade, n=50** (was +0.37, n=53);
+  plain variant **−0.042R, n=248**. The live shadow compares against these, not the earlier numbers.
+- Shadow built as IG commit 3656e79 (committed locally on Oct 2, push and deploy pending) (`orb-shadow` / `orb-shadow-plain` in benched_outcomes, `/orb` tally).
+
+### Part 13e — Gold: 15-min range + 5-min break-and-retest (user idea, Oct 2 2026). PRE-REGISTERED before running.
+Gold already failed ~1,450 ORB variants (Parts 13/13b), so this is ONE small pre-registered family, not a new search.
+- Range: first 15 min from 09:30 ET (1-min mid). Variant: 08:20 ET (COMEX gold open).
+- Break: a 5-min mid close beyond the range. Trend: M5 swing structure (variant: none = first side to break).
+- Retest: within 12 five-minute bars, a 5-min bar's mid low (long) touches the broken level and closes back beyond it →
+  enter at the next 1-min open (ask/bid). A 5-min close back inside the range first = failed break, stand aside.
+- Stop: opposite side of the range (variant: range midpoint). TP 2R. BE at +1R variant. Flatten 15:30 ET. 1 trade/day.
+- **Primary: 09:30 / swing / opposite-side stop / no BE.** Grid 2×2×2×2 = 16. Controls: forced long/short on the same
+  days, coin-flip direction, by year, best-of-16 under a coin flip. US30 is reported for information only.
+
+**Result (13e):** `ORB_RETEST=XAU_USD,US30_USD`, NYSE holidays excluded.
+- **Gold primary (09:30/swing/opp/noBE): n=101, WR 41%, avgR −0.044 [−0.24,+0.14], PF 0.91.** Y1 −0.09 / Y2 +0.02.
+  The trend direction adds nothing: it beats a coin flip in 56% of runs; longs +0.03 / shorts −0.13; forcing long −0.08,
+  forcing short −0.03. 46% of trades end on the 15:30 clock (median stop $11.6, so the 2R target is ~$23 away).
+- **Gold grid of 16: all CIs contain zero, the best is +0.043 (08:20/swing/mid), and best-of-16 vs coin flip p = 0.56.**
+  The 08:20 COMEX open is no better. Halves are unstable (e.g. 08:20/swing/opp Y1 +0.10 → Y2 −0.33).
+- US30 for information: primary −0.15R; best +0.04, p = 0.67. The retest version does NOT carry the US30 pop edge.
+- **HIGH confidence: no edge in 15-min range + 5-min break-and-retest on gold.** Gold's NY-open ORB is now closed across
+  1-min/5-min triggers, 5/15-min ranges, the 09:30 and 08:20 opens, fixed/volatility/structure stops, and trend filters.
+
+### Part 13f — Hour-of-day / day-of-week drift scan on gold (Oct 2 2026, inline node on the M1 cache)
+23 UK hours × 539 days, returns de-trended by the overall +0.26 bps/hour bull drift. Largest |t|: 01:00 UK +2.40, 07:00 +2.05.
+With 23 tests the null's expected max |t| is ~2.6, so **nothing survives correction**. The two "best" hours are also
+year-2-only (01:00: Y1 +1.6 → Y2 +5.4 bps; 07:00: Y1 −0.3 → Y2 +5.4), and a round trip costs ~1.7–1.9 bps of spread
+against effects of 2–3 bps. Day of week flips sign between years (Tue +1.27 → −0.79, Thu +0.87 → −0.61).
+**No calendar or timing anomaly. The only robust feature of gold in this window is the drift itself.**
+
+---
+
+## Part 14 — Do real yields and the dollar add an edge on gold? (Oct 2 2026). Script: `research_macro_filter.js`. PRE-REGISTERED.
+
+### Question
+Gold's textbook drivers are US real yields (falling = bullish) and the dollar (falling = bullish). This is information
+that is NOT in gold's own chart, which every earlier part was limited to.
+- **(A)** Does LAGGED macro predict gold's next move at all (daily, ~2005–2026)?
+- **(B)** Does it improve the bot's own EMA-Trend signals (24 mo, real strategy code, bracket exit, 15-min fill delay)?
+
+### Hypotheses
+- H1: Macro adds information. Trades aligned with the macro tailwind beat opposed ones.
+- H2: Gold prices macro in instantly; EMA trend already embeds it. Lagged macro adds nothing.
+- H3: The link broke in 2022+ (gold rallied through high real yields on central-bank buying), so even if (A) worked
+  historically it fails in the bot's window. **Prior: H2/H3 more likely than H1.**
+
+### No look-ahead
+- Real yield = FRED DFII10 (10y TIPS), using only dates STRICTLY BEFORE the signal's NY date.
+- Dollar = DXY rebuilt from Oanda FX (ICE weights: EUR −0.576, JPY 0.136, GBP −0.119, CAD 0.091, SEK 0.042, CHF 0.036),
+  at the signal's own bar. FRED's broad dollar index (DTWEXBGS) is REJECTED: it is published weekly, so using it would
+  silently look ahead.
+
+### Pre-registered definitions
+- RY5 = DFII10 change over the last 5 available business days (bp). USD5 = log change in synthetic DXY over 5 days.
+- Macro BULL = RY5<0 AND USD5<0; BEAR = both >0; else MIXED. A trade is ALIGNED if it is a BUY in BULL or a SELL in BEAR,
+  OPPOSED if the reverse.
+- **(B) primary:** in-session signals, 15-min delay. Metric: E[R](aligned) − E[R](opposed), month-block bootstrap 90% CI.
+  PASS = CI excludes 0 AND the same sign in both halves of the window. Secondary: E[R] after dropping opposed vs all.
+  One variant only: 20-day lookback. Nothing else.
+- **(A):** next-day gold log return on BULL days minus BEAR days. Year-block bootstrap. Sub-periods 2005–12 / 2013–19 /
+  2020–26, plus the contemporaneous correlation as a sanity check (it should be strongly negative).
+
+### Evidence (run Oct 2 2026; replay uses the LIVE container's strategy env, since the local .env is stale)
+Baseline replay: 124 in-session signals, E[R] +0.285, PF 1.50 (it reproduces Part 3's +0.25 on a longer window).
+Signals are evaluated bar by bar and overlap, so their n overstates the independent evidence (live is ~3 trades/month).
+
+**(A) Daily 2006–2026, next-day return BULL minus BEAR:**
+| lookback | 2006–12 | 2013–19 | 2020–26 | ALL (90% CI) |
+|---|---|---|---|---|
+| 5d (primary) | +6.4bp | +5.0bp | **−4.6bp** | +2.3bp [−4.1, +8.4] |
+| 20d | +3.0bp | +6.9bp | +4.2bp | +4.8bp [−0.5, +10.5] |
+The same-day gold/DXY correlation is a stable −0.41 in every period, so the relationship is real CONTEMPORANEOUSLY.
+LAGGED, every CI contains zero. The 5d sign flips in 2020–26 (the H3 decoupling). The 20d variant is positive in all
+three periods but borderline. At ~5bp/day it is close to a round-trip spread (~1.8bp): not tradeable on its own. MEDIUM.
+
+**(B) Bot signals, 5d (primary):** ALIGNED n=56 +0.32 | OPPOSED n=21 −0.16 | MIXED n=47 +0.45.
+ALIGNED−OPPOSED **+0.48, 90% CI [−0.37, +1.15]** (H1 +0.39, H2 +0.42). **FAILS the pre-registered bar (CI includes 0).**
+Dropping OPPOSED: +0.09R [−0.02, +0.23]. **20d variant contradicts it:** ALIGNED +0.22 vs OPPOSED +0.39 (−0.17).
+Descriptive only: "real yield alone" flips between lookbacks too (5d: with +0.41 / against −0.02; 20d: +0.16 / +0.51).
+A filter whose sign depends on whether you look back 5 or 20 days is noise at this sample size.
+
+### Confidence & conclusion
+- **H2/H3 supported, H1 not.** HIGH confidence there is no macro filter for the bot that this data can justify.
+  MEDIUM that a slow (20d) daily macro tilt has a tiny, historically consistent drift, too small to trade alone.
+- Self-critique: 21 opposed signals is too few to detect even a large effect. Absence of proof ≠ proof of absence.
+  But adopting the 5d filter would be choosing the lookback that happened to work, which is exactly the snooping this
+  protocol forbids.
+- **Next:** none for the live bot. If revisited, the only honest route is a forward test: log the macro state on every
+  live trade (cheap) and judge after ~40 trades, rather than mining the same 24 months again.
