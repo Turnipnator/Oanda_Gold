@@ -1551,3 +1551,13 @@ A filter whose sign depends on whether you look back 5 or 20 days is noise at th
   protocol forbids.
 - **Next:** none for the live bot. If revisited, the only honest route is a forward test: log the macro state on every
   live trade (cheap) and judge after ~40 trades, rather than mining the same 24 months again.
+
+### Part 14 — FORWARD TEST, pre-registered Oct 2 2026 (no bot change)
+Everything after **2026-10-02** is unseen data. Rules FROZEN exactly as the 5d primary above: DFII10 5-obs change (dates
+strictly before the signal's NY date), synthetic DXY 120-H1-bar log change, BULL/BEAR/MIXED, ALIGNED/OPPOSED.
+- **Data:** `research_session_filter.js` (live container strategy env, 15-min delay) → `research_macro_filter.js`, with
+  signals restricted to time ≥ 2026-10-03. Fresh downloads, nothing reused from the in-sample run.
+- **Review date: 2027-10-04** (or earlier if OPPOSED reaches n ≥ 20).
+- **PASS (adopt as a live filter candidate):** ALIGNED−OPPOSED > 0 with a month-block 90% CI excluding 0, AND
+  dropping OPPOSED improves E[R] by ≥ +0.05R. Anything else = FAIL, and the idea is closed.
+- **Not allowed at review:** changing the lookback, the weights or the classification, or pooling in-sample data.
