@@ -104,8 +104,9 @@ ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "cat /root/Oanda_Gold/logs/gold
 ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "grep -ac 'WOULD BLOCK' /root/Oanda_Gold/logs/gold_bot.log"
 ```
 - To judge a block, replay it on M1 bid/ask (`/v3/instruments/XAU_USD/candles?granularity=M1&price=BA`),
-  with a $20 stop and 2R TP, both on time and 15 min late. Scored so far: Sep 18 LONG and Oct 6 SHORT
-  = 3 losses dodged, 0 winners forgone. NOT yet scored: Jul 31, Aug 3, Aug 4, Aug 11, Sep 15, Sep 16, Sep 17.
+  with a $20 stop and 2R TP, both on time and 15 min late, then sequence (2h cooldown, one position,
+  displacement of real trades). All 9 episodes Jul 10–Oct 6 scored: 7 losses dodged, 1 coin-flip winner
+  forgone (Sep 16), 2 displacement-neutral; filter added +5.2R (on time) to +8.3R (+15 min). Score new ones.
 - If a trade fired despite a `WOULD BLOCK` log, enforcement is broken — investigate.
 - Cross-check the cooldown is honoured (no re-fires inside `TRADE_COOLDOWN_HOURS`):
 ```bash
