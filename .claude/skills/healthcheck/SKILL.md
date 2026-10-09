@@ -96,9 +96,16 @@ For EMA Trend strategy, key things to check in logs:
 
 **Leg filter (now ENFORCED) — verify it's actually firing:**
 ```bash
-# Any signals BLOCKED by the leg filter, and any "WOULD BLOCK" still logged
-ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "grep -iE 'BLOCKED by leg|WOULD BLOCK|LegFilter' /root/Oanda_Gold/logs/gold_bot.log | tail -15"
+# Real blocks only: one line per H1 candle, inside 08-22 UK, across all rotations.
+# The leg filter runs BEFORE the session check, so raw greps also show out-of-hours scans and the
+# stale Friday candle re-logged all weekend. A raw grep reported a Sep 18 setup as "Sep 20".
+ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "cat /root/Oanda_Gold/logs/gold_bot*.log | grep -a 'BLOCKED by leg'" | node -e 'const seen=new Set(),out=[];for(const l of require("fs").readFileSync(0,"utf8").split("\n")){const m=l.match(/(LONG|SHORT) setup BLOCKED.*legATR=([0-9.]+).*leg \$([0-9.]+).*"timestamp":"([0-9-]+ [0-9:]+)"/);if(!m)continue;const ts=m[4],k=ts.slice(0,13);if(seen.has(k))continue;seen.add(k);const d=new Date(ts.replace(" ","T")+"Z"),uk=+new Intl.DateTimeFormat("en-GB",{timeZone:"Europe/London",hour:"numeric",hourCycle:"h23"}).format(d),dow=d.getUTCDay();if(uk<8||uk>=22||dow===0||dow===6)continue;out.push(`${ts} UTC (UK ${uk}h) ${m[1]} legATR ${m[2]}x leg $${m[3]}`)}out.sort();console.log(out.slice(-15).join("\n")||"no in-session blocks")'
+# Enforcement check: any "WOULD BLOCK" at all means the filter is in observe-only mode
+ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "grep -ac 'WOULD BLOCK' /root/Oanda_Gold/logs/gold_bot.log"
 ```
+- To judge a block, replay it on M1 bid/ask (`/v3/instruments/XAU_USD/candles?granularity=M1&price=BA`),
+  with a $20 stop and 2R TP, both on time and 15 min late. Scored so far: Sep 18 LONG and Oct 6 SHORT
+  = 3 losses dodged, 0 winners forgone. NOT yet scored: Jul 31, Aug 3, Aug 4, Aug 11, Sep 15, Sep 16, Sep 17.
 - If a trade fired despite a `WOULD BLOCK` log, enforcement is broken — investigate.
 - Cross-check the cooldown is honoured (no re-fires inside `TRADE_COOLDOWN_HOURS`):
 ```bash
