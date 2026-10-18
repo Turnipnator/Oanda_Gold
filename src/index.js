@@ -612,6 +612,10 @@ class GoldTradingBot {
     try {
       logger.info('🔍 Scanning market for setups...');
 
+      // Sizing reads a cached balance and FX factor; refresh them every scan.
+      // Non-fatal: on failure the last known values (12h FX window) still apply.
+      await this.riskManager.refreshSizingInputs();
+
       // Get historical candles (H4 - main timeframe)
       const allCandles = await this.client.getCandles(
         Config.TRADING_SYMBOL,

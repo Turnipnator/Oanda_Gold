@@ -134,6 +134,33 @@ prop('a stale or unusable factor falls back to 1.0 rather than to nonsense',
         && (size === 0 || size === Math.min(Math.max(Math.floor((bal * pct) / dd), 1), 50000));
   });
 
+// Regression for #1494 (Oct 16 2026): the factor was last fetched 70h earlier,
+// nothing refreshed it, and the trade sized at fx 1.0 — 43 units, not 57.
+{
+  const rm = manager(87081.31, 0.7625);
+  rm.homeFactorAt = Date.now() - 70 * 3600e3;
+  let fetches = 0;
+  rm.client = {
+    getBalance: async () => { fetches++; return { nav: 87233.79 }; },
+    getHomeConversionFactors: async () => ({ currency: 'USD', loss: 0.7568 }),
+  };
+  await rm.refreshSizingInputs();
+  const size = withLimits(10, 50000, () => rm.calculatePositionSize(4178.58, 4158.58, 0.01));
+  check('a stale factor is refreshed before sizing (#1494: 57 units, not 43)', size === 57, `got ${size}`);
+  check('the balance is refreshed with it', rm.currentBalance === 87233.79, `got ${rm.currentBalance}`);
+  await rm.refreshSizingInputs();
+  check('a fresh factor is not re-fetched', fetches === 1, `${fetches} fetches`);
+
+  const down = manager(87081.31, 0.7625);
+  down.homeFactorAt = Date.now() - 70 * 3600e3;
+  down.client = {
+    getBalance: async () => { throw new Error('503'); },
+    getHomeConversionFactors: async () => null,
+  };
+  await down.refreshSizingInputs();
+  check('a failed refresh leaves the balance as it was', down.currentBalance === 87081.31);
+}
+
 prop('size is always a whole number of units', [price, distance, balance, riskPct],
   (p, d, bal, pct) => {
     const size = manager(bal).calculatePositionSize(p, p - d, pct);

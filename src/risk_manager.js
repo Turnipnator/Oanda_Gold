@@ -20,6 +20,9 @@ class RiskManager {
   // enough in a day to matter next to a 25% currency error, and refusing to
   // trade on a stale rate would be a self-inflicted outage.
   static HOME_FACTOR_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+  // How often refreshSizingInputs actually re-fetches. Under the 15-min scan
+  // interval, so every scan refreshes.
+  static SIZING_REFRESH_MS = 10 * 60 * 1000;
 
   constructor(logger, oandaClient) {
     this.logger = logger;
@@ -151,6 +154,18 @@ class RiskManager {
       this.logger.error(`Failed to sync balance: ${error.message}`);
       return this.currentBalance;
     }
+  }
+
+  /**
+   * Keep the balance and FX factor that sizing reads fresh. Called at the start
+   * of every market scan. Until Oct 2026 only startup and Telegram /status ran
+   * syncBalance, so the 12h FX cache was nearly always stale at entry and trades
+   * sized at fx 1.0 (#1494, Oct 16: 43 units instead of 57). Skips the round
+   * trip if the last refresh is recent, so a burst of calls costs one fetch.
+   */
+  async refreshSizingInputs() {
+    if (Date.now() - this.homeFactorAt < RiskManager.SIZING_REFRESH_MS) return;
+    await this.syncBalance();
   }
 
   /**
