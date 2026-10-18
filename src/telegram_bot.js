@@ -59,6 +59,8 @@ class GoldTelegramBot {
       this.bot.onText(/\/stop/, (msg) => this.handleStop(msg));
       this.bot.onText(/\/resume/, (msg) => this.handleResume(msg));
       this.bot.onText(/\/emergency/, (msg) => this.handleEmergency(msg));
+      this.bot.onText(/\/drawdown/, (msg) => this.handleDrawdown(msg));
+      this.bot.onText(/\/ddreset/, (msg) => this.handleDrawdownReset(msg));
       this.bot.onText(/\/help/, (msg) => this.handleHelp(msg));
 
       // Handle callback queries (button presses)
@@ -395,6 +397,62 @@ class GoldTelegramBot {
   }
 
   /**
+   * Handle /drawdown command - kill switch status
+   */
+  async handleDrawdown(msg) {
+    if (!this.isAuthorized(msg.from.id)) return;
+    if (!this.tradingBot) {
+      await this.bot.sendMessage(msg.chat.id, '⚠️ Trading bot not connected');
+      return;
+    }
+    await this.bot.sendMessage(msg.chat.id, this.formatDrawdown(this.tradingBot.riskManager.drawdownStatus()));
+  }
+
+  formatDrawdown(st) {
+    const money = v => (Number.isFinite(v) ? v.toFixed(2) : 'n/a');
+    const pct = v => (Number.isFinite(v) ? (v * 100).toFixed(2) + '%' : 'n/a');
+    return (st.halted ? '🛑 DRAWDOWN KILL SWITCH: HALTED\n' : '📉 Drawdown kill switch: armed\n') +
+      `Peak balance: ${money(st.peakBalance)} (${st.peakAt ?? 'n/a'})\n` +
+      `Balance: ${money(st.balance)}\n` +
+      `Drawdown: ${pct(st.drop)} of ${pct(st.limit)} limit` +
+      (st.halted ? `\nHalted ${st.haltedAt} at ${money(st.haltBalance)}. /ddreset to re-arm.` : '');
+  }
+
+  /**
+   * Handle /ddreset command - re-arm the drawdown kill switch
+   */
+  async handleDrawdownReset(msg) {
+    if (!this.isAuthorized(msg.from.id)) return;
+    if (!this.tradingBot) {
+      await this.bot.sendMessage(msg.chat.id, '⚠️ Trading bot not connected');
+      return;
+    }
+    const keyboard = {
+      inline_keyboard: [
+        [{ text: '✅ CONFIRM RE-ARM', callback_data: 'ddreset_confirm' }],
+        [{ text: '❌ Cancel', callback_data: 'ddreset_cancel' }]
+      ]
+    };
+    await this.bot.sendMessage(
+      msg.chat.id,
+      this.formatDrawdown(this.tradingBot.riskManager.drawdownStatus()) +
+      '\n\nRe-arming resets the peak to the CURRENT balance and allows new entries again. Sure?',
+      { reply_markup: keyboard }
+    );
+  }
+
+  async handleDrawdownResetCallback(query, data) {
+    const where = { chat_id: query.message.chat.id, message_id: query.message.message_id };
+    if (data === 'ddreset_confirm' && this.tradingBot) {
+      const st = this.tradingBot.riskManager.resetDrawdown();
+      await this.bot.editMessageText('✅ Kill switch re-armed\n\n' + this.formatDrawdown(st), where);
+      await this.sendNotification('📉 Drawdown kill switch re-armed by operator.');
+    } else if (data === 'ddreset_cancel') {
+      await this.bot.editMessageText('Re-arm cancelled. Kill switch unchanged.', where);
+    }
+  }
+
+  /**
    * Handle /compare command - Compare strategies
    */
   async handleCompare(msg) {
@@ -454,7 +512,9 @@ class GoldTelegramBot {
       '*Control:*\n' +
       '/stop - Stop trading (keep positions)\n' +
       '/resume - Resume trading\n' +
-      '/emergency - Emergency stop (close all)\n\n' +
+      '/emergency - Emergency stop (close all)\n' +
+      '/drawdown - Drawdown kill switch status\n' +
+      '/ddreset - Re-arm the kill switch after a halt\n\n' +
       '*Other:*\n' +
       '/help - Show this help message\n\n' +
       '*Notifications:*\n' +
@@ -492,6 +552,10 @@ class GoldTelegramBot {
       // Emergency callbacks
       else if (data.startsWith('emergency_')) {
         await this.handleEmergencyCallback(query, data);
+      }
+      // Drawdown kill switch re-arm
+      else if (data.startsWith('ddreset_')) {
+        await this.handleDrawdownResetCallback(query, data);
       }
 
       await this.bot.answerCallbackQuery(query.id);

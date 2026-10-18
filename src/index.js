@@ -17,6 +17,7 @@ import RiskManager from './risk_manager.js';
 import GoldTelegramBot from './telegram_bot.js';
 import StrategyTracker from './strategy_tracker.js';
 import { formatConfidence } from './format.js';
+import { assessFreshness } from './freshness.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -615,6 +616,7 @@ class GoldTradingBot {
       // Sizing reads a cached balance and FX factor; refresh them every scan.
       // Non-fatal: on failure the last known values (12h FX window) still apply.
       await this.riskManager.refreshSizingInputs();
+      await this.relayDrawdownAlert();
 
       // Get historical candles (H4 - main timeframe)
       const allCandles = await this.client.getCandles(
@@ -825,6 +827,42 @@ class GoldTradingBot {
   /**
    * Execute a trade
    */
+  /**
+   * Fetch the live price and latest candles and ask assessFreshness() whether
+   * they are current enough to trade on. Any failure to fetch = not fresh.
+   */
+  async checkDataFreshness() {
+    let price, candles;
+    try {
+      price = await this.client.getPrice(Config.TRADING_SYMBOL);
+    } catch (error) {
+      return { ok: false, reason: `live price unavailable (${error.message})` };
+    }
+    try {
+      candles = await this.client.getCandles(Config.TRADING_SYMBOL, Config.TIMEFRAME, 3);
+    } catch (error) {
+      return { ok: false, reason: `candles unavailable (${error.message})` };
+    }
+    const verdict = assessFreshness({
+      price, candles, granularity: Config.TIMEFRAME,
+      maxPriceAgeSec: Config.STALE_PRICE_MAX_SECONDS,
+      maxCandleAgeMin: Config.STALE_CANDLE_MAX_MINUTES,
+    });
+    return verdict.ok ? { ...verdict, price } : verdict;
+  }
+
+  /** Forward a freshly tripped drawdown kill switch to Telegram, once. */
+  async relayDrawdownAlert() {
+    const msg = this.riskManager.pendingDrawdownAlert;
+    if (!msg || !this.telegramBot) return;
+    try {
+      await this.telegramBot.notifyError(`🛑 ${msg}`);
+      this.riskManager.pendingDrawdownAlert = null;
+    } catch (telegramError) {
+      logger.warn(`Failed to send drawdown alert (will retry next scan): ${telegramError.message}`);
+    }
+  }
+
   async executeTrade(signal, units, levels, reason, strategyName, confidence, setup = null) {
     try {
       logger.info('');
@@ -873,35 +911,44 @@ class GoldTradingBot {
       const slippageAmount = Config.pipsToPrice(Config.MAX_SLIPPAGE_PIPS);
       const maxDrift = Config.pipsToPrice(Config.MAX_ENTRY_DRIFT_PIPS);
 
-      let boundAnchor = levels.entryPrice; // fallback to old behaviour if pricing is unavailable
-      try {
-        const live = await this.client.getPrice(Config.TRADING_SYMBOL);
-        // Bound the side we actually fill on: LONG pays the ask, SHORT hits the bid.
-        boundAnchor = isLongOrder ? live.ask : live.bid;
-
-        const adverseDrift = isLongOrder
-          ? live.mid - levels.entryPrice
-          : levels.entryPrice - live.mid;
-
-        if (adverseDrift > maxDrift) {
-          logger.warn(
-            `🚫 Entry cancelled - price ran $${adverseDrift.toFixed(2)} against the signal ` +
-            `(limit $${maxDrift.toFixed(2)}): signal $${levels.entryPrice.toFixed(2)} → market ` +
-            `$${live.mid.toFixed(2)}. Not chasing.`
-          );
-          return;
+      // Stale-data guard: never send an order off a feed that has stopped moving.
+      // It also supplies the live price for the chase check, so pricing being
+      // unavailable now refuses the entry instead of bounding off the signal.
+      const fresh = await this.checkDataFreshness();
+      if (!fresh.ok) {
+        logger.error(`🧊 STALE DATA - entry refused: ${fresh.reason}`);
+        if (this.telegramBot) {
+          try {
+            await this.telegramBot.notifyError(`🧊 ${signal} entry refused - stale market data\n\n${fresh.reason}`);
+          } catch (telegramError) {
+            logger.warn(`Failed to send stale-data alert: ${telegramError.message}`);
+          }
         }
-
-        logger.info(
-          `📏 Entry drift: $${adverseDrift.toFixed(2)} vs signal ` +
-          `(limit $${maxDrift.toFixed(2)}), spread $${live.spread.toFixed(2)}`
-        );
-      } catch (priceError) {
-        logger.warn(
-          `⚠️ Live price unavailable for chase check (${priceError.message}) - ` +
-          `bounding slippage off the signal price instead`
-        );
+        return;
       }
+      logger.info(`🧊 Data fresh: price ${fresh.priceAge.toFixed(0)}s old, last candle closed ${fresh.candleAge.toFixed(0)}m ago`);
+
+      const live = fresh.price;
+      // Bound the side we actually fill on: LONG pays the ask, SHORT hits the bid.
+      const boundAnchor = isLongOrder ? live.ask : live.bid;
+
+      const adverseDrift = isLongOrder
+        ? live.mid - levels.entryPrice
+        : levels.entryPrice - live.mid;
+
+      if (adverseDrift > maxDrift) {
+        logger.warn(
+          `🚫 Entry cancelled - price ran $${adverseDrift.toFixed(2)} against the signal ` +
+          `(limit $${maxDrift.toFixed(2)}): signal $${levels.entryPrice.toFixed(2)} → market ` +
+          `$${live.mid.toFixed(2)}. Not chasing.`
+        );
+        return;
+      }
+
+      logger.info(
+        `📏 Entry drift: $${adverseDrift.toFixed(2)} vs signal ` +
+        `(limit $${maxDrift.toFixed(2)}), spread $${live.spread.toFixed(2)}`
+      );
 
       const priceBound = isLongOrder
         ? boundAnchor + slippageAmount

@@ -23,11 +23,15 @@
  *
  * Run: npm run test:sizing
  */
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import fc from 'fast-check';
 import RiskManager from '../src/risk_manager.js';
 import OandaClient from '../src/oanda_client.js';
 import Config from '../src/config.js';
 
+const DD_FILE = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'sizing-')), 'dd.json');
 const silent = { info: () => {}, warn: () => {}, error: () => {}, risk: () => {}, trade: () => {} };
 
 let pass = 0, fail = 0;
@@ -58,6 +62,7 @@ const propAsync = async (name, arbitraries, predicate) => {
 
 function manager(balance, lossFactor = 1.0) {
   const rm = new RiskManager(silent, null);
+  rm.drawdownFile = DD_FILE;              // keep syncBalance's kill-switch writes out of ./data
   rm.currentBalance = balance;
   // Quote -> account currency. Live is ~0.754 (USD loss -> GBP); tests drive
   // the whole plausible range, and 1.0 is the pre-conversion behaviour.

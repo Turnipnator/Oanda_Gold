@@ -41,6 +41,15 @@ class Config {
   // Daily Targets
   static TARGET_DAILY_PROFIT = parseFloat(process.env.TARGET_DAILY_PROFIT || '100');
   static MAX_DAILY_LOSS = parseFloat(process.env.MAX_DAILY_LOSS || '150');
+  // Drawdown kill switch: block new entries once the realised balance is this
+  // fraction below its peak. 0.08 = ~8 full losses at 1% risk. 0 disables.
+  static MAX_DRAWDOWN_PCT = parseFloat(process.env.MAX_DRAWDOWN_PCT || '0.08');
+
+  // Stale-data guard, checked just before any order is sent. A price older than
+  // this many seconds, or a last COMPLETED candle that ended longer ago than
+  // this many minutes (assumes H1: normal is 0-60), refuses the entry.
+  static STALE_PRICE_MAX_SECONDS = parseFloat(process.env.STALE_PRICE_MAX_SECONDS || '120');
+  static STALE_CANDLE_MAX_MINUTES = parseFloat(process.env.STALE_CANDLE_MAX_MINUTES || '75');
 
   // Trading Instrument
   static TRADING_SYMBOL = process.env.TRADING_SYMBOL || 'XAU_USD';

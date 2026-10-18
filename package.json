@@ -15,7 +15,8 @@
     "test:bracket": "node tests/bracket.test.mjs",
     "test:sizing": "node tests/sizing.test.mjs",
     "test:format": "node tests/format.test.mjs",
-    "test:reconcile": "node tests/reconcile.test.mjs"
+    "test:reconcile": "node tests/reconcile.test.mjs",
+    "test:killswitch": "node tests/killswitch.test.mjs"
   },
   "keywords": [
     "trading",

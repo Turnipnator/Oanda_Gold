@@ -13,6 +13,7 @@ const __dirname = path.dirname(__filename);
 // Stats file path - use /app/data in Docker, ./data locally
 const DATA_DIR = process.env.NODE_ENV === 'production' ? '/app/data' : path.join(__dirname, '..', 'data');
 const STATS_FILE = path.join(DATA_DIR, 'trading_stats.json');
+const DRAWDOWN_FILE = path.join(DATA_DIR, 'drawdown_state.json');
 
 class RiskManager {
   // How long a cached FX conversion factor stays usable. Long, because the
@@ -51,8 +52,93 @@ class RiskManager {
     this.homeLossFactor = 1.0;
     this.homeFactorAt = 0;
 
+    // Drawdown kill switch. Peak REALISED balance (account currency) and a latch
+    // that blocks new entries once the balance falls MAX_DRAWDOWN_PCT below it.
+    // Persisted, so a restart cannot clear a tripped switch; only resetDrawdown()
+    // (Telegram /ddreset) re-arms it. The peak starts at the balance seen on
+    // first run, not the account's history, which would trip it immediately.
+    this.drawdownFile = DRAWDOWN_FILE;
+    this.drawdown = { peakBalance: null, peakAt: null, halted: false, haltedAt: null, haltBalance: null };
+    this.pendingDrawdownAlert = null;
+
     // Load persisted stats on startup
     this.loadStats();
+    this.loadDrawdown();
+  }
+
+  loadDrawdown() {
+    try {
+      if (!fs.existsSync(this.drawdownFile)) return;
+      this.drawdown = { ...this.drawdown, ...JSON.parse(fs.readFileSync(this.drawdownFile, 'utf8')) };
+      const st = this.drawdownStatus();
+      this.logger.info(
+        `📂 Drawdown state: peak ${st.peakBalance?.toFixed(2)}, ` +
+        (st.halted ? `🛑 HALTED since ${st.haltedAt}` : 'armed')
+      );
+    } catch (error) {
+      this.logger.error(`Failed to load drawdown state: ${error.message}`);
+    }
+  }
+
+  saveDrawdown() {
+    try {
+      fs.mkdirSync(path.dirname(this.drawdownFile), { recursive: true });
+      fs.writeFileSync(this.drawdownFile, JSON.stringify(this.drawdown, null, 2));
+    } catch (error) {
+      this.logger.error(`Failed to save drawdown state: ${error.message}`);
+    }
+  }
+
+  /**
+   * Feed a fresh realised balance to the kill switch. Ratchets the peak up while
+   * armed, and latches the halt once the drop from peak reaches the limit.
+   */
+  updateDrawdown(balance, now = Date.now()) {
+    if (!(Number.isFinite(balance) && balance > 0)) return;
+    const dd = this.drawdown;
+    if (!(dd.peakBalance > 0)) {
+      Object.assign(dd, { peakBalance: balance, peakAt: new Date(now).toISOString() });
+      this.logger.info(`📉 Drawdown kill switch armed: peak ${balance.toFixed(2)}, limit ${(Config.MAX_DRAWDOWN_PCT * 100).toFixed(1)}%`);
+      this.saveDrawdown();
+      return;
+    }
+    if (dd.halted) return;
+    if (balance > dd.peakBalance) {
+      Object.assign(dd, { peakBalance: balance, peakAt: new Date(now).toISOString() });
+      this.saveDrawdown();
+      return;
+    }
+    const limit = Config.MAX_DRAWDOWN_PCT;
+    const drop = (dd.peakBalance - balance) / dd.peakBalance;
+    if (limit > 0 && drop >= limit) {
+      Object.assign(dd, { halted: true, haltedAt: new Date(now).toISOString(), haltBalance: balance });
+      this.saveDrawdown();
+      const msg =
+        `DRAWDOWN KILL SWITCH: balance ${balance.toFixed(2)} is ${(drop * 100).toFixed(2)}% below peak ` +
+        `${dd.peakBalance.toFixed(2)} (limit ${(limit * 100).toFixed(1)}%). New entries blocked until /ddreset.`;
+      this.logger.error(`🛑 ${msg}`);
+      this.pendingDrawdownAlert = msg;
+    }
+  }
+
+  drawdownStatus() {
+    const dd = this.drawdown;
+    const bal = this.realisedBalance;
+    const drop = dd.peakBalance > 0 && Number.isFinite(bal) ? (dd.peakBalance - bal) / dd.peakBalance : null;
+    return { ...dd, balance: bal ?? null, drop, limit: Config.MAX_DRAWDOWN_PCT };
+  }
+
+  /** Re-arm after a halt: the peak restarts at the current realised balance. */
+  resetDrawdown(now = Date.now()) {
+    const bal = this.realisedBalance;
+    this.drawdown = {
+      peakBalance: Number.isFinite(bal) && bal > 0 ? bal : null,
+      peakAt: new Date(now).toISOString(), halted: false, haltedAt: null, haltBalance: null,
+    };
+    this.pendingDrawdownAlert = null;
+    this.saveDrawdown();
+    this.logger.warn(`📉 Drawdown kill switch RESET by operator: peak now ${this.drawdown.peakBalance?.toFixed(2)}`);
+    return this.drawdownStatus();
   }
 
   /**
@@ -148,6 +234,10 @@ class RiskManager {
       const balance = await this.client.getBalance();
       this.currentBalance = balance.nav; // Use NAV (includes unrealized P&L)
       this.logger.info(`Balance synced: $${this.currentBalance.toFixed(2)}`);
+      // The kill switch measures REALISED balance: an open trade's float would
+      // ratchet the peak on paper gains that may never be banked.
+      this.realisedBalance = balance.balance;
+      this.updateDrawdown(balance.balance);
       await this.refreshHomeConversion();
       return this.currentBalance;
     } catch (error) {
@@ -322,6 +412,10 @@ class RiskManager {
   async canOpenTrade(entryPrice, stopLoss, positionSize) {
     // Reset daily stats if new day
     this.resetDailyStats();
+
+    if (this.drawdown.halted) {
+      return { allowed: false, reason: `DRAWDOWN_HALT (since ${this.drawdown.haltedAt}; /ddreset to re-arm)` };
+    }
 
     // Check daily loss limit
     if (this.dailyPnL <= -Config.MAX_DAILY_LOSS) {

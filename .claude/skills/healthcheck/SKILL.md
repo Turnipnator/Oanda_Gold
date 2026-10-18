@@ -41,6 +41,15 @@ ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "docker ps --format '{{.Names}}
   real S5 fills (research_notes Part 8, Sep 4 2026) found trades open across releases hit TP 7 of 9,
   flattening before releases costs 0.08R/trade, and the calendar covers 7% of shocks. Do not recommend
   a calendar/flatten rule on the next gap loss; report the slippage and move on.
+- **Survival guards (since Oct 18 2026).** `DRAWDOWN KILL SWITCH` (error + Telegram) means the
+  REALISED balance fell `MAX_DRAWDOWN_PCT` (8%) below its peak and new entries are latched off until
+  someone runs `/ddreset` on Telegram. It survives restarts (`/app/data/drawdown_state.json`, `halted`).
+  Open trades keep their broker stops; `/emergency` is the flatten button. The peak started at
+  £86,429.84 on Oct 18 2026, NOT the account's history. Report peak, balance and drawdown % every check.
+  `STALE DATA - entry refused` (error + Telegram) means a signal fired but the live price was >120s old,
+  Oanda said not tradeable, or the last completed H1 candle closed >75 min ago. A one-off around a
+  maintenance window is fine; repeats in session mean the feed is broken. Each real entry logs
+  `🧊 Data fresh: price Ns old, last candle closed Nm ago`.
 - **Scan for ORDER REJECTIONS** — `BOUNDS_VIOLATION` (slippage guard rejecting fills),
   `INSUFFICIENT_MARGIN`, `MARKET_HALTED`. A burst of these around a trade means the bot
   fought to enter a fast-moving market — correlate with the next fill's outcome.
@@ -71,7 +80,7 @@ ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "docker logs gold-trading-bot -
 ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "du -sh /root/Oanda_Gold/logs/*"
 ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "docker inspect gold-trading-bot --format 'RestartCount={{.RestartCount}} StartedAt={{.State.StartedAt}}'"
 # order rejections + hard errors (last 24h)
-ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "tail -40 /root/Oanda_Gold/logs/error.log; echo '---REJECTIONS---'; grep -iE 'BOUNDS_VIOLATION|INSUFFICIENT_MARGIN|MARKET_HALTED|REJECT' /root/Oanda_Gold/logs/gold_bot.log | tail -20; echo '---BRACKET ALERTS (any hit = incident)---'; grep -aE 'BRACKET UNVERIFIED|NO STOP LOSS|Bracket adjustment attempt' /root/Oanda_Gold/logs/gold_bot.log | tail -20"
+ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "tail -40 /root/Oanda_Gold/logs/error.log; echo '---REJECTIONS---'; grep -iE 'BOUNDS_VIOLATION|INSUFFICIENT_MARGIN|MARKET_HALTED|REJECT' /root/Oanda_Gold/logs/gold_bot.log | tail -20; echo '---BRACKET ALERTS (any hit = incident)---'; grep -aE 'BRACKET UNVERIFIED|NO STOP LOSS|Bracket adjustment attempt|DRAWDOWN KILL SWITCH|STALE DATA' /root/Oanda_Gold/logs/gold_bot.log | tail -20; echo '---KILL SWITCH STATE---'; docker exec gold-trading-bot cat /app/data/drawdown_state.json"
 ```
 
 ## 3. STRATEGY STATUS
@@ -142,7 +151,7 @@ ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "docker stats gold-trading-bot 
 - Check that EMA Trend config matches expectations (fast EMAs, ATR multipliers, R:R)
 
 ```bash
-ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "docker exec gold-trading-bot env | grep -E 'STRATEGY|EMA_TREND|LEG_FILTER|ALLOW_SHORT|TRAILING|TAKE_PROFIT|BREAKOUT_STOP|TRADE_COOLDOWN|TRADING_START|TRADING_END|CONFIG_REGIME|RISK|POSITION_SIZE' | sort"
+ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "docker exec gold-trading-bot env | grep -E 'STRATEGY|EMA_TREND|LEG_FILTER|ALLOW_SHORT|TRAILING|TAKE_PROFIT|BREAKOUT_STOP|TRADE_COOLDOWN|TRADING_START|TRADING_END|CONFIG_REGIME|RISK|POSITION_SIZE|DRAWDOWN|STALE|DAILY_LOSS' | sort"
 ```
 
 Expected current values — **BRACKET-EXIT regime (Jul 10 2026), risk raised Sep 21 2026** (flag any drift):
@@ -154,6 +163,8 @@ Expected current values — **BRACKET-EXIT regime (Jul 10 2026), risk raised Sep
   `EMA_TREND_ADX_MIN=20`, `EMA_TREND_RSI_SELL_MIN=45`, `EMA_TREND_MAX_SL=2000` ($20 cap)
 - `EMA_TREND_LEG_FILTER_ENFORCE=true`, `EMA_TREND_LEG_FILTER_THRESHOLD=2.0`
 - `EMA_TREND_ATR_SL_MULT=1.5`, `TRADE_COOLDOWN_HOURS=2`
+- **Survival guards (Oct 18 2026):** `MAX_DRAWDOWN_PCT=0.08`, `STALE_PRICE_MAX_SECONDS=120`,
+  `STALE_CANDLE_MAX_MINUTES=75`, `MAX_DAILY_LOSS=1496`
 - **Sizing (CHANGED Sep 21 2026 — do NOT flag as drift):** `MIN_POSITION_SIZE=10` (was 100 —
   the floor that caused the £1,818 outlier), **`MAX_RISK_PER_TRADE=0.01`** (was 0.005). At a $20
   stop this yields **~57 units ≈ £861 risk**. Flag if size is pinned at the floor again.
@@ -164,8 +175,8 @@ Expected current values — **BRACKET-EXIT regime (Jul 10 2026), risk raised Sep
   across the date unchanged — **only £ breaks**. Never add a post-Sep-21 £ to a pre-Sep-21 total.
   The regime tag keeps the `bracket-jul10` prefix deliberately: prefix-match to pool R stats,
   exact-match to separate the £ scale.
-- **Startup FX line is a required check:** logs must show `FX: 1 USD of loss = 0.7xxx account
-  currency`. If it is missing or warns "stale", sizing silently falls back to 1.0 and under-risks
+- **FX line is a required check:** since Oct 18 2026 (commit d44a74c) every scan logs `Balance synced` +
+  `FX: 1 USD of loss = 0.7xxx account currency` (~every 15 min, not just at startup). If it is missing or warns "stale", sizing silently falls back to 1.0 and under-risks
   by ~25%. `grep -a 'FX:' /root/Oanda_Gold/logs/gold_bot.log | tail -2`
 
 ⚠️ Rollbacks (then `docker compose up -d` — **never** `restart`, it does not re-read `.env`):

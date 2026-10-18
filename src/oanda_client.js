@@ -119,7 +119,8 @@ class OandaClient {
         ask: parseFloat(pricing.asks[0].price),
         mid: (parseFloat(pricing.bids[0].price) + parseFloat(pricing.asks[0].price)) / 2,
         spread: parseFloat(pricing.asks[0].price) - parseFloat(pricing.bids[0].price),
-        time: pricing.time
+        time: pricing.time,
+        tradeable: pricing.tradeable
       };
     } catch (error) {
       this.logger.error(`Failed to get price for ${instrument}: ${error.message}`);
