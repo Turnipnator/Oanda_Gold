@@ -1561,3 +1561,63 @@ strictly before the signal's NY date), synthetic DXY 120-H1-bar log change, BULL
 - **PASS (adopt as a live filter candidate):** ALIGNED−OPPOSED > 0 with a month-block 90% CI excluding 0, AND
   dropping OPPOSED improves E[R] by ≥ +0.05R. Anything else = FAIL, and the idea is closed.
 - **Not allowed at review:** changing the lookback, the weights or the classification, or pooling in-sample data.
+
+---
+
+## Part 15 — "Flush and reclaim": can intraday V-turns be traded? (Oct 16 2026). Script: `research_flush_reclaim.js`. PRE-REGISTERED.
+
+### Question
+Oct 16 2026: gold flushed to ~$4160 at 14:20 UK (stopping out live #1494 at the low), ripped to ~$4203 by 15:30, then
+fell back to ~$4162. User asked whether moves like this can be traded mechanically. Test a short-timeframe reversal rule.
+
+### Sub-questions
+1. Does buying a sharp 15-min drop once price reclaims the drop candle's open (and the mirror for spikes) earn E[R] > 0
+   after the real bid/ask spread?
+2. Does it survive a later fill (5 / 15 min) and the out-of-sample half?
+3. Is it different from the opposite trade (momentum: flushes continue)?
+
+### Hypotheses
+- **H1 reversal edge:** the reclaim marks failed breakdowns; E[R] > 0 with a CI excluding 0.
+- **H2 noise:** the reclaim is random; E[R] ≈ −spread cost (slightly negative).
+- **H3 momentum:** flushes tend to continue; the reclaim trade loses more than spread and the reverse trade would win.
+
+### Rules — FROZEN before any results were seen
+- Data: Oanda XAU_USD M1 bid/ask, 2024-10-01 → 2026-10-16. Mid = (bid+ask)/2 for signals; fills on bid/ask.
+- **Flush candle (long setup):** a completed M15 mid candle (clock-aligned) with open − low ≥ $15. Spike (short setup):
+  high − open ≥ $15. If both, skip.
+- **Trigger:** within the 30 minutes after the M15 candle closes, the first M1 whose mid close is back above the flush
+  candle's open (long) / below it (short).
+- **Entry:** open of the next M1 bar, at the ask (long) / bid (short). Window 08:00–22:00 UK Mon–Fri on the trigger bar.
+- **Exit:** stop $10 from the fill, take-profit 2R ($20). Stop checked on bid (long) / ask (short); if stop and TP are
+  both touched in the same minute, the stop counts first. No time stop. One position at a time; setups during a trade are skipped.
+- **PRIMARY:** E[R] with a month-block bootstrap 90% CI. **PASS = CI excludes 0 AND both halves (split 2025-10-01)
+  positive AND the +5-min-delay variant still positive.** Anything else = FAIL.
+- **Reported as a grid, not chosen from:** threshold $10/$15/$20 and 1.0×H1-ATR(14); TP 1R/1.5R/2R/3R; stop $10 vs
+  below the flush extreme − $1; entry delay +0/+5/+15 min; long/short split; reverse (momentum) trade.
+
+### Evidence (run Oct 16 2026; 723,317 M1 bid/ask bars 2024-10-01 → 2026-10-16; mean in-session spread $0.63 = 0.063R)
+| Variant | n | /mo | WR | E[R] (90% month-block CI) | PF | H1 / H2 |
+|---|---|---|---|---|---|---|
+| **PRIMARY $15, $10 stop, 2R, +0 min** | 480 | 19.6 | 30% | **−0.107 [−0.199, −0.047]** | 0.85 | −0.55 / −0.09 |
+| +5 min delay | 456 | 18.6 | 29% | −0.158 [−0.247, −0.080] | 0.78 | |
+| long only / short only | 305 / 220 | | | −0.164 / −0.115 | | |
+| REVERSE (momentum) | 474 | | 28% | −0.156 [−0.267, −0.063] | 0.78 | |
+| $10 / $20 / 1×H1-ATR threshold | 1051 / 242 / 179 | | | −0.093 / −0.045 / −0.112 | | |
+| TP 1R / 1.5R / 3R | | | | −0.103 / −0.106 / −0.072 | | |
+| stop beyond flush extreme, 2R / 1R | | | | −0.130 / −0.056 | | |
+| **Zero spread (fills at mid), primary** | 479 | | 34% | **+0.020 [−0.096, +0.099]** | 1.03 | |
+| Zero spread, REVERSE | 473 | | 30% | −0.090 | | |
+32-cell threshold × TP × delay sweep: 31 negative, the one positive is $20/3R/+0 at +0.01 (and −0.17 at +5 min).
+Caveat: a fixed $ threshold puts 460 of 480 primary trades after Oct 2025 (gold's vol regime); the ATR-scaled variant
+spreads them evenly and fails the same way. Oct 16 itself: no M15 candle dropped $15 (largest $12.8 at 12:45 UTC); the
+rally candle (13:30 UTC, +$19.5) would only have set up a SHORT reclaim, which never triggered. The rule would not
+have caught the day that prompted it.
+
+### Confidence & conclusion
+- **FAIL on every pre-registered criterion. H2 (noise) supported — HIGH.** At zero cost the reclaim trade is ≈ 0R;
+  the spread then makes it reliably negative. H3 (momentum) not supported either: the reverse trade also loses.
+  H1 (reversal edge) ruled out at this spec. Delay makes it worse, as with every intraday idea tested here.
+- Self-critique: stop-first-in-same-minute is slightly pessimistic, but the zero-spread run shows there is nothing for
+  a fairer fill model to rescue. Only one rule family was tested; this does not prove no intraday reversal edge exists,
+  but 15-min flush/reclaim on gold is closed.
+- **Next:** none. Do not revisit on another hindsight V-turn chart.
