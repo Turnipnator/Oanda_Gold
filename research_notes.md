@@ -1855,3 +1855,24 @@ gold's current effective ATR multiple lose to the designed 1.5×ATR on identical
 - Decision rule for the gold stop (written now): B-PASS + gold's own diff in the same direction → the designed 1.5×ATR stop
   (MAX_SL raised to $40 as a safety cap) becomes a candidate to deploy now on paper, at the user's call, with a CONFIG_REGIME bump.
   B-FAIL → keep $20 and the Feb re-check.
+
+### Evidence (run Oct 29 2026; same caches as Part 19)
+**(A) ATR gate:** pooled 8 markets n 499 (20.5/mo), E[R] −0.073 [−0.214, +0.076], PF 0.90; halves −0.164 / +0.003; zero spread −0.034.
+Clusters > 0: 3/6 (Silver +0.09, Oil +0.10, JPY +0.02). Per-market results within ±0.01R and ±3 trades of Part 19 → **FAIL**.
+Why it changed nothing (gatecheck, all H1 bars): |price − EMA3| is median 0.2×ATR, p90 0.6×ATR on every market (EMA3 hugs price),
+so a 0.85×ATR gate binds on ~3–5% of bars, and the 0.3% gate binds on 6% (gold), 3% (SPX), 0.2% (EUR). The gate is nearly inert
+everywhere. **The Part 19 "lead" was my misreading:** I compared the gate's SIZE in ATR across markets without checking how often it binds.
+**(B) Stop width, k = 1.205 (gold's effective capped multiple):** paired 1.5×ATR − 1.205×ATR over 786 out-of-sample signals:
+**−0.018 [−0.089, +0.052]**, halves −0.032 / −0.005; clusters > 0: 3/6 (only JPY's CI excludes zero, and it's negative). **FAIL**.
+Reported only: gold (in-sample, both years) −0.054 [−0.238, +0.131]; pooled under the Part-19 gate −0.018 [−0.091, +0.051].
+
+### Verdict
+- (A) FAIL. Multi-market route CLOSED for EMA Trend (Parts 19+20). The edge, such as it is, is gold-specific. **HIGH.**
+- (B) FAIL, and the CI is tight: on identical entries, widening 1.2×ATR → 1.5×ATR moves E[R] by ≈ 0 ± 0.07R across 786 signals.
+  Supports B-H2 (stop width ≈ R-neutral). Gold's recent +0.14–0.18R "wider is better" in Parts 18/19 is most likely noise on ~68
+  clustered signals. **MEDIUM** (other markets ≠ gold, but the mechanism — noise vs stop width — is generic).
+- Per the pre-written decision rule: **keep the $20 cap.** No deploy.
+
+### Next
+- The Feb re-check of research_stop_cap.js stays, but with a lower prior: B says to expect ≈ 0.
+- No further frequency levers queued. Remaining honest position: gold H1 ≈ 3 trades/month at a modest, unproven edge.
