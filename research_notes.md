@@ -1621,3 +1621,37 @@ have caught the day that prompted it.
   a fairer fill model to rescue. Only one rule family was tested; this does not prove no intraday reversal edge exists,
   but 15-min flush/reclaim on gold is closed.
 - **Next:** none. Do not revisit on another hindsight V-turn chart.
+
+## Part 16 — Oct 28 loss + the proposed Learning Enhancement Module: what turns this around? (Oct 29 2026)
+
+### Question
+1. Was the Oct 28 loss a malfunction or a normal stop? 2. Is the bracket era behaving outside expectation?
+3. Can the ML signal filter in `LEARNING_ENHANCEMENT.md` realistically be validated to its own 200-OOS-trade bar?
+
+### Hypotheses
+- H1: something broke (sizing, stop, fill). H2: normal variance of a modest edge, made to feel worse by the Sep-21 £ scale-up.
+- H3: a p_win filter over entry-time features can remove losers. H3-null: the features have already been mined (Parts 8–15, 71-config WRC p=0.36) and a learned filter will overfit.
+
+### Evidence (tracker pulled from VPS Oct 29; R computed from prices)
+- Oct 28 LONG 69u $4049.02 → stop $4032.72, `STOP_LOSS_ORDER`, **−1.00R, −£854**, fill $0.02 past the stop. Risk check: £85.6k × 1% = £856. Stop $16.28 (< $20 cap) gives 69u. **Correct size, clean fill.** H1 rejected — HIGH.
+- Bracket era n=8: **3W/5L** (TP 3/8), sumR **−0.38**, PF 0.94, max DD 5.4R; last 4 trades all losses. All 8 LONG.
+  Backtest expectation E[R] +0.15 to +0.25R/trade, ~4.5R typical DD. At n=8 the SE on mean R is ~0.6R, so −0.05R/trade is inside the noise band. H2 supported — MEDIUM (n=8 can't confirm the edge either way).
+- £ pain: the last 2 losses (−£651, −£854) came after the Sep-21 risk raise 0.5%→1% plus the FX fix (2.7× £ per R). The same R pattern before Sep 21 would read −£319 each.
+- Weak pattern, LOW confidence, NOT actionable: the 3 TP winners had legATR 1.92–2.09 and pullback −6% to −8% of ATR; the last 3 losers had legATR 1.58–1.73, and the Oct 28 entry had essentially zero pullback (−0.001). n=8, found post hoc. This is the kind of hypothesis a Phase 0 ledger exists to test, not one to trade on.
+- Feasibility of the module's test bar: live rate ~3 signals/mo → 200 filter-taken OOS trades ≈ 6+ years. The 24-mo replay yields ~72 in-session entries. Reaching 200 OOS trades the filter keeps (plus a training window) needs ~10+ years of H1 history, with $-denominated params (MAX_SL $20, leg filter in ATR is fine) rescaled for old price levels. Possible, but a real project.
+
+### Conclusion
+- Nothing is broken; the strategy is running as designed through a losing streak. Do not change entry/exit rules in reaction (Part 10–12 say parameter tuning doesn't help).
+- The only lever that changes the £ pain is risk per trade (edge-neutral, see position-sizing-fix).
+- Learning module: Phase 0 (signal ledger incl. rejected signals) is cheap and harmless and worth building. Validating Phases 1–2 to the module's own 200-trade bar must come from a long historical replay, not live data. Prior odds of passing are LOW given the features are already mined.
+
+### Next steps
+- User decision: keep 1% paper risk or drop back to 0.5%.
+- If approved: build Phase 0 ledger (live) + a 10y+ historical signal ledger (offline) and pre-register the walk-forward test.
+
+### Addendum (same day) — "would shorting the 5 losses have won?" + Phase 0 built
+- Mirror replay on M1 bid/ask (same $ stop, entry at the next minute's open, stop-first on ties; scratchpad `mirror/mirror.mjs`):
+  - 5 losers flipped to SHORT, 2R target: **2 win, 3 lose = +1R**. At 1R target: 5/5 win (+5R), near-tautological since a −1R long stop is roughly a +1R short move.
+  - All 8 flipped (you can't know in advance which will lose): SHORT 2R = **−2R** vs LONG +1R on the same replay. SHORT 1R = +2R, LONG 1R = −2R.
+  - Reading: shorting only the losers is pure hindsight. Flipping everything at 2R is worse. The 1R flip is "price round-trips in a downtrending Oct", which is Part 9's drift finding, n=8. **Not a signal — HIGH.**
+- Phase 0 signal ledger implemented: `src/signal_ledger.js`, candidate snapshot in `EmaTrendStrategy._buildCandidate`, offline labeller `scripts/label_signals.mjs`, `npm run test:ledger` (29 assertions). Old vs new strategy compared on 3,000 random series: signal/reason/confidence **byte-identical** (0 diffs), so trading behaviour is unchanged.

@@ -134,16 +134,19 @@ class EmaTrendStrategy {
 
     // --- FILTERS ---
     const filters = [];
+    const filterCodes = [];
 
     // 1. ADX trending filter
     if (adx < Config.EMA_TREND_ADX_MIN) {
       filters.push(`ADX ${adx.toFixed(1)} < ${Config.EMA_TREND_ADX_MIN} (ranging)`);
+      filterCodes.push('adx_low');
     }
 
     // 2. ADX rising filter (trend must be strengthening)
     const adxDeclining = adx < prevAdx - 0.5;
     if (adxDeclining) {
       filters.push(`ADX declining (${prevAdx.toFixed(1)} → ${adx.toFixed(1)})`);
+      filterCodes.push('adx_declining');
     }
 
     // --- CHECK EMA ALIGNMENT ---
@@ -158,6 +161,14 @@ class EmaTrendStrategy {
     const buyPullbackValid = priceDistancePct <= pullbackThreshold;   // Price near/below fast EMA
     const sellPullbackValid = priceDistancePct >= -pullbackThreshold; // Price near/above fast EMA
 
+    // Phase 0 signal ledger: a feature snapshot of every trend-aligned candle, traded or
+    // not, plus a skipReason code on each return below. Log-only — never read back here.
+    const alignedDirection = (bullishEMA && priceAboveSlow) ? 'LONG'
+      : (bearishEMA && priceBelowSlow && Config.ALLOW_SHORT) ? 'SHORT' : null;
+    const candidate = alignedDirection ? this._buildCandidate(completeCandles, alignedDirection, htfCandles, {
+      fast, medium, slow, atr, adx, prevAdx, rsi, price, priceDistancePct,
+    }) : null;
+
     let signal = null;
     let reason = '';
     let confidence = 0;
@@ -168,7 +179,9 @@ class EmaTrendStrategy {
         return {
           signal: null,
           reason: `Bullish EMA alignment but filtered: ${filters.join(', ')}`,
-          confidence: 0
+          confidence: 0,
+          candidate,
+          skipReason: filterCodes.join('+'),
         };
       }
 
@@ -177,7 +190,9 @@ class EmaTrendStrategy {
         return {
           signal: null,
           reason: `Bullish alignment but RSI ${rsi.toFixed(1)} outside ${Config.EMA_TREND_RSI_OS}-${Config.EMA_TREND_RSI_BUY_MAX} range`,
-          confidence: 0
+          confidence: 0,
+          candidate,
+          skipReason: 'rsi_band',
         };
       }
 
@@ -186,7 +201,9 @@ class EmaTrendStrategy {
         return {
           signal: null,
           reason: `Price too far from EMA${Config.EMA_TREND_FAST} (${(priceDistancePct * 100).toFixed(2)}% > ${Config.EMA_TREND_PULLBACK_PCT}%), wait for pullback`,
-          confidence: 0
+          confidence: 0,
+          candidate,
+          skipReason: 'pullback',
         };
       }
 
@@ -197,7 +214,9 @@ class EmaTrendStrategy {
           return {
             signal: null,
             reason: `Bullish H1 but HTF is BEARISH — don't buy against HTF trend`,
-            confidence: 0
+            confidence: 0,
+            candidate,
+            skipReason: 'htf_against',
           };
         }
         if (htfTrend === 'NEUTRAL') {
@@ -218,7 +237,9 @@ class EmaTrendStrategy {
         return {
           signal: null,
           reason: `Bearish EMA alignment but filtered: ${filters.join(', ')}`,
-          confidence: 0
+          confidence: 0,
+          candidate,
+          skipReason: filterCodes.join('+'),
         };
       }
 
@@ -226,7 +247,9 @@ class EmaTrendStrategy {
         return {
           signal: null,
           reason: `Bearish alignment but RSI ${rsi.toFixed(1)} outside ${Config.EMA_TREND_RSI_SELL_MIN}-${Config.EMA_TREND_RSI_OB} range`,
-          confidence: 0
+          confidence: 0,
+          candidate,
+          skipReason: 'rsi_band',
         };
       }
 
@@ -234,7 +257,9 @@ class EmaTrendStrategy {
         return {
           signal: null,
           reason: `Price too far from EMA${Config.EMA_TREND_FAST} (${(priceDistancePct * 100).toFixed(2)}% < -${Config.EMA_TREND_PULLBACK_PCT}%), wait for bounce`,
-          confidence: 0
+          confidence: 0,
+          candidate,
+          skipReason: 'pullback',
         };
       }
 
@@ -244,7 +269,9 @@ class EmaTrendStrategy {
           return {
             signal: null,
             reason: `Bearish H1 but HTF is BULLISH — don't sell against HTF trend`,
-            confidence: 0
+            confidence: 0,
+            candidate,
+            skipReason: 'htf_against',
           };
         }
       }
@@ -291,6 +318,8 @@ class EmaTrendStrategy {
         legSize: legInfo.legSize,
         legInDirection: legInfo.legInDirection,
         legWouldBlock: legInfo.wouldBlock,
+        candidate,
+        skipReason: 'leg_filter',
       };
     }
 
@@ -320,6 +349,49 @@ class EmaTrendStrategy {
         price: parseFloat(price.toFixed(2)),
         pullbackPct: parseFloat((priceDistancePct * 100).toFixed(3)),
       },
+      candidate,
+      skipReason: null,
+    };
+  }
+
+  /**
+   * Feature snapshot for the Phase 0 signal ledger. Everything here is computed from
+   * completed candles at signal time — no look-ahead. stopDistance is the bracket the
+   * strategy would place (same clamp as calculateEntryLevels), so the offline labeller
+   * can score skipped signals on exactly the trade they would have been.
+   */
+  _buildCandidate(completeCandles, direction, htfCandles, v) {
+    const r = (x, dp = 2) => (x === null || x === undefined || !Number.isFinite(x) ? null : parseFloat(x.toFixed(dp)));
+    const leg = this._calculateLegInfo(completeCandles, v.atr, direction);
+    const last = completeCandles[completeCandles.length - 1];
+    const range = last.high - last.low;
+    const minSL = Config.pipsToPrice(Config.EMA_TREND_MIN_SL);
+    const maxSL = Config.pipsToPrice(Config.EMA_TREND_MAX_SL);
+    const stopDistance = Math.max(minSL, Math.min(maxSL, v.atr * Config.EMA_TREND_ATR_SL_MULT));
+    return {
+      strategy: 'EMA Trend',
+      candleTime: last.time,
+      direction,
+      price: r(v.price),
+      emaFast: r(v.fast),
+      emaMedium: r(v.medium),
+      emaSlow: r(v.slow),
+      atr: r(v.atr),
+      adx: r(v.adx, 1),
+      prevAdx: r(v.prevAdx, 1),
+      rsi: r(v.rsi, 1),
+      pullbackPct: r(v.priceDistancePct * 100, 3),
+      emaSpreadATR: r((v.fast - v.slow) / v.atr, 3),
+      distSlowATR: r((v.price - v.slow) / v.atr, 3),
+      legATR: r(leg.legATR, 3),
+      legSize: r(leg.legSize),
+      legInDirection: leg.legInDirection,
+      candleRangeATR: r(range / v.atr, 3),
+      candleBodyATR: r((last.close - last.open) / v.atr, 3),
+      candleCloseLoc: range > 0 ? r((last.close - last.low) / range, 3) : null,
+      htfTrend: htfCandles ? this._getHTFTrend(htfCandles) : null,
+      stopDistance: r(stopDistance),
+      tpRR: Config.EMA_TREND_TP_RR,
     };
   }
 

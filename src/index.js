@@ -18,6 +18,7 @@ import GoldTelegramBot from './telegram_bot.js';
 import StrategyTracker from './strategy_tracker.js';
 import { formatConfidence } from './format.js';
 import { assessFreshness } from './freshness.js';
+import SignalLedger from './signal_ledger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,6 +27,7 @@ const __dirname = path.dirname(__filename);
 const DATA_DIR = process.env.NODE_ENV === 'production' ? '/app/data' : path.join(__dirname, '..', 'data');
 const POSITIONS_FILE = path.join(DATA_DIR, 'active_positions.json');
 const COOLDOWN_FILE = path.join(DATA_DIR, 'trade_cooldown.json');
+const SIGNAL_LEDGER_FILE = path.join(DATA_DIR, 'signal_ledger.jsonl');
 
 // A single failed position-monitor cycle (Oanda's sporadic 401/503 on the 60s poll) is transient
 // and self-heals on the next cycle, so it is logged at warn. Escalate to error only once this many
@@ -64,6 +66,7 @@ class GoldTradingBot {
 
     // Initialize strategy tracker
     this.tracker = new StrategyTracker();
+    this.signalLedger = new SignalLedger(SIGNAL_LEDGER_FILE, logger);
     this.tracker.registerStrategy('Breakout + ADX', liveStrategyName === 'Breakout + ADX');
     this.tracker.registerStrategy('Breakout + ADX (Realtime MTF)', liveStrategyName === 'Breakout + ADX');
     this.tracker.registerStrategy('Triple Confirmation', liveStrategyName === 'Triple Confirmation');
@@ -153,6 +156,21 @@ class GoldTradingBot {
       currentHour,
       reason: allowed ? null : `Outside trading hours (${startHour}:00-${endHour}:00 UK, currently ${currentHour}:00)`
     };
+  }
+
+  /**
+   * Phase 0 learning ledger: record what happened to a trend-aligned candle. Only the
+   * EMA Trend strategy attaches a candidate; for anything else this is a no-op.
+   */
+  recordSignal(setup, skipReason, extra = {}) {
+    if (!setup?.candidate) return;
+    const weekdayUK = new Date().toLocaleString('en-GB', { timeZone: 'Europe/London', weekday: 'short' });
+    this.signalLedger.record(setup.candidate, { skipReason, ...extra }, {
+      loggedAt: new Date(),
+      regime: Config.CONFIG_REGIME,
+      hourUK: this.checkTradingHours().currentHour,
+      weekdayUK,
+    });
   }
 
   /**
@@ -697,6 +715,7 @@ class GoldTradingBot {
       // Check if live strategy has a signal
       if (!liveSetup.signal) {
         logger.info(`🟢 LIVE (${liveStrategyName}): No setup - ${liveSetup.reason}`);
+        this.recordSignal(liveSetup, liveSetup.skipReason || 'no_signal');
 
         // Check hypothetical strategy
         if (hypotheticalSetup.signal) {
@@ -726,6 +745,7 @@ class GoldTradingBot {
 
       if (hasOandaPosition) {
         logger.info('❌ Already have open position in XAU_USD - skipping');
+        this.recordSignal(liveSetup, 'position_open');
         return;
       }
 
@@ -735,12 +755,14 @@ class GoldTradingBot {
         logger.info('⚠️ Local position open but Oanda shows none — trade just closed. Starting cooldown and skipping entry.');
         this.lastTradeCloseTime = Date.now();
         this.saveCooldown();
+        this.recordSignal(liveSetup, 'position_just_closed');
         return;
       }
 
       // Check trade cooldown (prevents rapid re-entries after losses)
       const cooldown = this.checkTradeCooldown();
       if (cooldown.active) {
+        this.recordSignal(liveSetup, 'cooldown', { detail: `${cooldown.remainingMinutes}m remaining` });
         logger.info(`⏳ Trade cooldown active - ${cooldown.remainingMinutes} minutes remaining`);
         logger.info(`   Last trade closed at ${new Date(this.lastTradeCloseTime).toISOString()}`);
         logger.info(`   Next trade allowed after ${new Date(this.lastTradeCloseTime + Config.TRADE_COOLDOWN_HOURS * 3600000).toISOString()}`);
@@ -752,6 +774,7 @@ class GoldTradingBot {
       if (!tradingHours.allowed) {
         logger.info(`🌙 ${tradingHours.reason}`);
         logger.info(`   Skipping trade entry - will resume at ${Config.TRADING_START_HOUR}:00 UK time`);
+        this.recordSignal(liveSetup, 'session');
         return;
       }
 
@@ -768,6 +791,7 @@ class GoldTradingBot {
 
       if (positionSize === 0) {
         logger.error('Position size calculation failed');
+        this.recordSignal(liveSetup, 'size_zero');
         return;
       }
 
@@ -783,11 +807,13 @@ class GoldTradingBot {
 
       if (!canTrade.allowed) {
         logger.risk(`Trade blocked: ${canTrade.reason}`);
+        this.recordSignal(liveSetup, 'risk_blocked', { detail: canTrade.reason });
         return;
       }
 
       // Execute LIVE trade
-      await this.executeTrade(liveSetup.signal, units, levels, liveSetup.reason, liveStrategyName, liveSetup.confidence, liveSetup);
+      const execution = await this.executeTrade(liveSetup.signal, units, levels, liveSetup.reason, liveStrategyName, liveSetup.confidence, liveSetup);
+      this.recordSignal(liveSetup, execution.status === 'filled' ? null : execution.status, execution);
 
       // Record hypothetical trade if other strategy also signaled
       if (hypotheticalSetup.signal) {
@@ -924,7 +950,7 @@ class GoldTradingBot {
             logger.warn(`Failed to send stale-data alert: ${telegramError.message}`);
           }
         }
-        return;
+        return { status: 'stale_data', detail: fresh.reason };
       }
       logger.info(`🧊 Data fresh: price ${fresh.priceAge.toFixed(0)}s old, last candle closed ${fresh.candleAge.toFixed(0)}m ago`);
 
@@ -942,7 +968,7 @@ class GoldTradingBot {
           `(limit $${maxDrift.toFixed(2)}): signal $${levels.entryPrice.toFixed(2)} → market ` +
           `$${live.mid.toFixed(2)}. Not chasing.`
         );
-        return;
+        return { status: 'entry_drift', detail: `$${adverseDrift.toFixed(2)} adverse` };
       }
 
       logger.info(
@@ -1038,7 +1064,7 @@ class GoldTradingBot {
         if (order.rejectReason) {
           log(`Reject reason: ${order.rejectReason}`);
         }
-        return;
+        return { status: 'order_rejected', detail: rejectText.trim() };
       }
 
       // Recalculate SL based on actual fill price (not theoretical entry price)
@@ -1260,6 +1286,7 @@ class GoldTradingBot {
         }
       }
 
+      return { status: 'filled', tradeId: order.tradeId, fillPrice: order.price };
     } catch (error) {
       logger.error(`Failed to execute trade: ${error.message}`);
       if (this.telegramBot) {
@@ -1269,6 +1296,7 @@ class GoldTradingBot {
           logger.warn(`Failed to send Telegram notification: ${telegramError.message}`);
         }
       }
+      return { status: 'execution_error', detail: error.message };
     }
   }
 
