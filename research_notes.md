@@ -1756,3 +1756,39 @@ Recent half: median ATR **$16.65**, the $20 cap binds on **65 of 68** signals.
 - Keep $20; keep counting bracket trades to n=20 (~Feb 2027). Re-run this script then with the extra months as a
   confirmation-only check (no new variants): if $40 again leads with a tighter CI, it becomes a real candidate.
 - Phase 0 ledger logs `stopDistance` and `atr` on every candidate, so labelled skipped signals add cap evidence for free.
+
+## Part 19 — Does the live EMA Trend rule work on other markets? (Oct 29 2026). Script: `research_multi_market.js`. PRE-REGISTERED.
+
+### Question
+Gold H1 gives ~3 trades/month and every attempt to squeeze more out of gold has failed (M15, RSI band, stop cap, V-turns).
+Two sub-questions: (1) Is the edge general to trending markets, or gold-specific (or luck)? Unchanged rules on markets they were
+never tuned on are a genuine out-of-sample test. (2) If general, how many extra trades/month would it add?
+The n=20 live checkpoint (~Feb 2027) cannot answer either: at ±1.44R per-trade SD, n=20 gives a 95% band of about ±0.63R.
+
+### Hypotheses
+- H1 (general trend edge): EMA alignment + pullback + rising ADX captures trend continuation on any liquid trending market;
+  pooled out-of-sample E[R] > 0.
+- H2 (gold-specific / overfit): the parameters were chosen on gold; elsewhere E[R] ≈ 0 or negative (silver already −0.18R).
+- H3 (cost-limited): gross edge exists but spread/ATR is worse on some markets, so it shows at zero spread only.
+- H4 (correlated luck): positives come only from the US index cluster, which is one bet, not three.
+
+### Pre-registered design (fixed before any non-gold data was fetched)
+- Markets: XAU_USD (reference only, tuned in-sample), and OUT-OF-SAMPLE: XAG_USD, US30_USD, SPX500_USD, NAS100_USD, WTICO_USD,
+  EUR_USD, GBP_USD, USD_JPY. No additions or removals after seeing results.
+- Clusters (for the breadth criterion): Silver, US indices (US30+SPX500+NAS100 = ONE cluster), Oil, EUR, GBP, JPY → 6 clusters.
+- Engine = Part 18: real EmaTrendStrategy with live env, H1 from M1 mids, Oanda H4 mid HTF closed by signal time, entry at first
+  M1 bar ≥ H1 close + 15 min, M1 bid/ask fills (each market's own spread), stop-first on ties, gaps at the open, 120h cap,
+  session 08–22 UK, Oct 2024 → Oct 28 2026.
+- Rules exactly as coded, no per-market tuning. The pullback gate stays 0.3% of price (as coded) even though that is a different
+  multiple of ATR per market — changing it would be tuning. Stop = 1.5×ATR **unclamped** (the $2–$20 clamp is in gold dollars and
+  has no meaning elsewhere); TP = 2× stop.
+- Realistic portfolio per market: one position at a time, 2h cooldown after exit. Markets run independently in parallel.
+- **PRIMARY:** pooled per-trade E[R] over the 8 out-of-sample markets' portfolio trades; 95% month-block bootstrap (4000 draws;
+  resampling whole months keeps cross-market correlation within a month).
+- **PASS only if ALL hold:** (a) pooled E[R] 95% CI lower bound > 0; (b) ≥ 4 of 6 clusters have E[R] > 0;
+  (c) pooled E[R] > 0 in both halves (Oct 2024–Sep 2025, Oct 2025–Oct 2026).
+- Reported, not judged: per-market n, trades/month, E[R], WR, PF, halves; zero-spread E[R] (H3); 24h-session E[R];
+  median spread as a fraction of the stop; median pullback gate in ATR units; gold with the live $20 clamp vs unclamped.
+- Overnight financing is NOT modelled (holds are ~5–12h median); flagged as a small unmodelled cost.
+- If PASS: the positive clusters become candidates for a paper deploy, which needs the user's approval and a CONFIG_REGIME decision.
+  If FAIL: the multi-market route is closed for this rule, and gold's year-1 result is more likely gold-specific or luck.
