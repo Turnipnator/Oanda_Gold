@@ -1792,3 +1792,38 @@ The n=20 live checkpoint (~Feb 2027) cannot answer either: at ±1.44R per-trade 
 - Overnight financing is NOT modelled (holds are ~5–12h median); flagged as a small unmodelled cost.
 - If PASS: the positive clusters become candidates for a paper deploy, which needs the user's approval and a CONFIG_REGIME decision.
   If FAIL: the multi-market route is closed for this rule, and gold's year-1 result is more likely gold-specific or luck.
+
+### Evidence (run Oct 29 2026; ~720–770k M1 bid/ask bars per market, Oct 2024 → Oct 28 2026)
+| Market | n | /mo | E[R] [95% CI] | WR | PF | yr1 / recent | zero-spread | spread/stop | pullback gate (ATR) |
+|---|---|---|---|---|---|---|---|---|---|
+| XAU (ref, unclamped) | 65 | 2.7 | +0.197 [−0.060, +0.455] | 40% | 1.33 | +0.19 / +0.20 | +0.24 | 0.03 | 0.87 |
+| XAG | 66 | 2.7 | +0.089 [−0.227, +0.365] | 36% | 1.14 | −0.25 / +0.34 | +0.09 | 0.05 | 0.46 |
+| US30 | 59 | 2.4 | +0.017 [−0.474, +0.442] | 34% | 1.03 | −0.10 / +0.14 | +0.02 | 0.02 | 1.70 |
+| SPX500 | 53 | 2.2 | −0.285 [−0.733, +0.231] | 26% | 0.65 | −0.16 / −0.40 | −0.28 | 0.03 | 1.53 |
+| NAS100 | 49 | 2.0 | −0.051 [−0.500, +0.527] | 33% | 0.93 | −0.44 / +0.43 | +0.01 | 0.02 | 1.12 |
+| WTICO | 59 | 2.4 | +0.109 [−0.321, +0.544] | 34% | 1.16 | +0.27 / −0.02 | +0.12 | 0.06 | 0.54 |
+| EUR_USD | 70 | 2.9 | −0.220 [−0.520, +0.095] | 27% | 0.70 | −0.37 / −0.10 | −0.16 | 0.09 | 2.79 |
+| GBP_USD | 78 | 3.2 | −0.231 [−0.622, +0.230] | 26% | 0.69 | −0.17 / −0.29 | −0.12 | 0.08 | 2.63 |
+| USD_JPY | 62 | 2.5 | +0.016 [−0.263, +0.279] | 34% | 1.02 | +0.00 / +0.03 | +0.06 | 0.05 | 2.27 |
+- **Pooled 8 out-of-sample markets: n 496 (20.3/mo), E[R] −0.074 [−0.216, +0.072], WR 31%, PF 0.89.** Halves −0.161 / −0.001.
+  Zero spread −0.034 [−0.180, +0.119]; 24h session −0.122. Clusters > 0: Silver, Oil, JPY (3 of 6).
+- Gold with the live $2–$20 clamp: n 69, +0.124 [−0.122, +0.373], yr1 +0.200 / recent +0.065.
+
+### Verdict: **FAIL on all three criteria.** H1 (general trend edge) not supported — **HIGH** for "no broad edge at these exact rules".
+- H3 (cost-limited) rejected: still negative pooled at zero spread. Spread is not what's missing.
+- H4 moot: the US index cluster is net negative.
+- H2 (gold-specific) is the best-supported reading, with one caveat found after the run (post hoc, **LOW**): the pullback gate
+  is 0.3% of price, which is ~0.5–0.9 ATR on gold/silver/oil but 1.1–2.8 ATR on indices and FX, i.e. effectively switched
+  off there. The three markets where the gate binds like it does on gold (XAG, WTICO, XAU) are the three most positive;
+  the FX pairs, where it is ~2.5 ATR, are the worst. That is a rules-transfer issue, not necessarily absence of edge, but
+  it was spotted from the results and every per-market CI spans zero — so it is a hypothesis for a new pre-registered
+  test, not a finding.
+- Side note (snooping-prone, Part 18 already looked): gold unclamped recent half +0.20 vs clamped +0.065 — same direction
+  as Part 18, still CI spanning zero.
+- Silver here +0.09 vs −0.18 in the Aug 12 test (different engine, period and stop rule); both CIs span zero. Still no case for it.
+
+### Next
+- Per protocol: no deploy. Multi-market route CLOSED for the rule as coded.
+- Possible Part 20 (only if the user wants it): pre-register an ATR-normalised pullback gate (gold-equivalent ≈ 0.85×ATR,
+  chosen from gold, not from these results) on the same 8 markets. Expect it to be a long shot: even the best clusters
+  here are +0.1R with CIs ±0.3–0.4R.
