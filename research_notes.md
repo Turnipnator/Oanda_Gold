@@ -1655,3 +1655,58 @@ have caught the day that prompted it.
   - All 8 flipped (you can't know in advance which will lose): SHORT 2R = **−2R** vs LONG +1R on the same replay. SHORT 1R = +2R, LONG 1R = −2R.
   - Reading: shorting only the losers is pure hindsight. Flipping everything at 2R is worse. The 1R flip is "price round-trips in a downtrending Oct", which is Part 9's drift finding, n=8. **Not a signal — HIGH.**
 - Phase 0 signal ledger implemented: `src/signal_ledger.js`, candidate snapshot in `EmaTrendStrategy._buildCandidate`, offline labeller `scripts/label_signals.mjs`, `npm run test:ledger` (29 assertions). Old vs new strategy compared on 3,000 random series: signal/reason/confidence **byte-identical** (0 diffs), so trading behaviour is unchanged.
+
+## Part 17 — Does the live EMA Trend rule work on M15? ("more, smaller, quicker trades") (Oct 29 2026). Script: `research_m15_trend.js`. PRE-REGISTERED.
+
+### Question
+User wants more trades that get in and out quicker for smaller profits, without a months-long live experiment.
+Part 9b showed smaller TPs on the H1 entries lose edge; Parts 13/15 showed intraday ideas die to spread. Untested:
+the SAME EmaTrendStrategy (real code, live env values) run one timeframe down — M15 signals, H1 as the HTF
+(the same 4× ratio as live H1→H4). Smaller ATR → smaller stops → smaller £ per trade at the same % risk, more signals.
+
+### Hypotheses
+- H1 (edge scales down): the trend/pullback edge is fractal; M15 keeps E[R] > 0 after spread at ~3–4× the trades.
+- H2 (cost kill): M15 stops are ~$5–10, spread ~$0.4–0.7 = 5–13% of R; any gross edge is eaten (Parts 13/15 pattern).
+- H3 (noise): EMA 3/8/21 alignment on M15 is mostly noise; E[R] ≈ 0 even at zero spread.
+
+### Pre-registered design (fixed before any data is fetched)
+- Data: Oanda XAU_USD M1 bid/ask 2024-10-01 → 2026-10-28; M15 and H1 mid candles aggregated from M1 mids.
+- Signals: real `EmaTrendStrategy.evaluateSetup` on a 250-bar M15 window, HTF = H1 candles CLOSED by signal time,
+  RSI from `TechnicalAnalysis.getLatestIndicators`. Live env: ADX_MIN 20, RSI_BUY_MAX 60 / SELL_MIN 45, pullback
+  0.3%, leg filter enforced 2.0× over 6 bars, ATR×1.5 stop clamped $2–$20, ALLOW_SHORT.
+- Entry: open of the first M1 bar ≥ M15 close + 1 min (a bot scanning right after each M15 close). LONG buys ask, SHORT sells bid.
+- Exit: resting stop + 2R target on M1 bid/ask, stop first when a bar touches both, gaps fill at the open, 48h cap.
+- Session 08–22 UK at fill time. One position at a time (signals while a trade is open are dropped). No cooldown.
+- **PRIMARY = 2R target (live rule).** 1R and 1.5R reported alongside; a 1R/1.5R pass with a primary fail is post hoc, NOT a pass.
+- **PASS requires ALL of:** (a) primary E[R] > 0 with month-block bootstrap 90% CI lower bound > 0 (2000 draws);
+  (b) E[R] > 0 in both halves (split 2025-10-01); (c) ≥ 8 in-session trades/month; (d) +5-min entry delay still E[R] > 0.
+  Anything else = FAIL. Zero-spread (mid fills) run reported as a diagnostic for H2 vs H3.
+
+### Evidence (run Oct 29 2026; 733,066 M1 bid/ask bars 2024-10-01 → 2026-10-28, 24.9 months; median in-session spread $0.59)
+| Variant | n | /mo | med stop | med hold | E[R] 2R (90% CI) | PF | H1 / H2 | E[R] 1R / 1.5R |
+|---|---|---|---|---|---|---|---|---|
+| **PRIMARY M15, +1 min, bid/ask** | 272 | 10.9 | $10.61 | 2.3h | **+0.026 [−0.099, +0.151]** | 1.04 | +0.018 / +0.032 | +0.001 / +0.034 |
+| M15, +5 min | 277 | 11.1 | $10.76 | 2.3h | +0.026 [−0.082, +0.132] | 1.04 | −0.006 / +0.048 | −0.009 / +0.043 |
+| M15, zero spread | 272 | 10.9 | | 2.4h | +0.120 [−0.008, +0.246] | 1.19 | +0.105 / +0.131 | +0.080 / +0.106 |
+| ANCHOR live H1 / Oanda H4, +15 min | 73 | 2.9 | $20.00 | 5.5h | +0.038 [−0.162, +0.233] | 1.06 | **+0.182 / −0.062** | −0.025 / +0.061 |
+| ANCHOR H1, zero spread | 73 | | | | +0.080 | 1.13 | +0.175 / +0.014 | |
+(UTC-bucket H4 anchor: −0.003, H1/H2 +0.182 / −0.132 — HTF alignment matters a little, not the story.)
+
+### Verdict: **FAIL** (criterion a: CI includes zero). b, c, d pass.
+- **H2 (cost kill) supported — MEDIUM.** The gross M15 edge is ~+0.12R; the spread takes ~0.09R of it ($0.59 on a ~$10.6 stop),
+  leaving ≈ 0. Same pattern as Parts 13/15. 1R/1.5R don't rescue it. Not worth building.
+
+### ⚠️ Bigger finding from the anchor (post hoc, flagged as such)
+- The live H1 rule on this stricter engine (real bid/ask, M1, one position): **+0.18R/trade Oct 2024–Sep 2025, −0.06R Oct 2025–Oct 2026.**
+  Earlier "+0.15 to +0.29R" figures sat mostly on the good first year. Live bracket era (n=8, −0.05R) agrees with the recent half.
+- Mechanism candidate: **the $20 stop cap now binds on 42 of 43 recent trades (vs 4 of 30 in year 1)**. Live agrees: 7 of 8
+  bracket trades had exactly $20 risk. In the high-vol regime the strategy no longer runs its designed 1.5×ATR stop but
+  a fixed $20 ≈ 0.8×ATR stop. Year-1 uncapped trades: +0.248R (n=26); capped: −0.25 (n=4, yr1), −0.04 (n=42, yr2).
+- Cap and regime are fully confounded here (nearly every recent trade is capped), so this does NOT show the cap is the cause.
+  The cap was tuned in July under the TRAIL exit ($20 beat $40 there) and has never been re-tested under the bracket exit.
+- Confidence: edge decayed in the last year — LOW-MEDIUM (n≈40 per half, CIs wide). Cap as cause — LOW (hypothesis only).
+
+### Next
+- Candidate pre-registered test: re-run the anchor with the cap widened ($30 / $40 / none) under the bracket exit, judged on
+  the Oct 2025–Oct 2026 half, paired on the same signals. Caveat in advance: it is chosen after seeing this split → snooping;
+  ~40 trades → low power. A pass would justify a paper change only, not confidence.
