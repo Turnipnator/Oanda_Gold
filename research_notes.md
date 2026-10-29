@@ -1710,3 +1710,49 @@ the SAME EmaTrendStrategy (real code, live env values) run one timeframe down �
 - Candidate pre-registered test: re-run the anchor with the cap widened ($30 / $40 / none) under the bracket exit, judged on
   the Oct 2025–Oct 2026 half, paired on the same signals. Caveat in advance: it is chosen after seeing this split → snooping;
   ~40 trades → low power. A pass would justify a paper change only, not confidence.
+
+## Part 18 — Is the $20 stop cap hurting the strategy under the bracket exit? (Oct 29 2026). Script: `research_stop_cap.js`. PRE-REGISTERED.
+
+### Question
+Part 17 found the $20 cap (EMA_TREND_MAX_SL=2000) binding on 42/43 trades since Oct 2025 while the H1 edge went to ≈ −0.06R.
+Does a wider cap restore the designed 1.5×ATR stop and the edge? **Chosen after seeing that split, so snooping-prone.**
+
+### Hypotheses
+- H1 (cap is the cause): a $20 stop ≈ 0.8×ATR in the current regime sits inside normal H1 noise; widening it lifts E[R] in the recent half.
+- H2 (regime is the cause): the recent year is simply worse for this entry; wider stops change little, or make it worse (longer holds, more gap exposure).
+- H3 (tail cost): wider stops win a little more often but bigger losses on gaps cancel it.
+
+### Pre-registered design (fixed before running)
+- Same engine as the Part 17 anchor: real EmaTrendStrategy (live env), H1 signals, Oanda H4 HTF closed by signal time, entry at the first
+  M1 bar ≥ H1 close + 15 min, M1 bid/ask fills, stop-first on ties, gaps at the open, **120h cap** (longer stops need it), session 08–22 UK.
+- Variants: MAX_SL **$20 (baseline), $30, $40, none ($100)**; MIN_SL $2; stop = clamp(1.5×ATR); TP = 2× stop. R is per-variant risk,
+  so at fixed % risk E[R] compares directly in £.
+- **PRIMARY = paired, all in-session signals resolved independently** (signals don't depend on the cap), per-signal R difference vs $20,
+  month-block bootstrap (4000 draws), judged on **Oct 2025 → Oct 2026**.
+- **A variant PASSES only if ALL hold:** (a) recent-half paired diff vs $20 has **95% CI lower bound > 0** (stricter than 90% because 3 variants);
+  (b) its own recent-half E[R] > 0; (c) year-1 (Oct 2024–Sep 2025) paired diff ≥ −0.05R (not buying the recent year at year-1's cost);
+  (d) realistic portfolio (one position, live 2h cooldown) recent-half E[R] above the $20 baseline's.
+- Reported, not judged: median hold, % holds > 24h, worst single trade (gap exposure), win rate.
+- If several pass, the narrowest passing cap is preferred (least tail exposure). A pass justifies a paper change only.
+
+### Evidence (run Oct 29 2026; 114 in-session signals, 46 year-1 / 68 recent; same M1 bid/ask cache as Part 17)
+| Recent half (Oct25–Oct26) | E[R] all signals | WR | med hold | >24h | worst | paired diff vs $20 [95% CI] | portfolio n / E[R] |
+|---|---|---|---|---|---|---|---|
+| $20 (live) | −0.080 | 31% | 5.1h | 16% | −1.45 | baseline | 40 / +0.039 |
+| $30 | −0.029 | 32% | 7.3h | 21% | −1.00 | +0.051 [−0.170, +0.290] | 37 / +0.054 |
+| $40 | +0.103 | 37% | 11.8h | 25% | −1.00 | **+0.183 [−0.143, +0.600]** | 36 / +0.167 |
+| none | +0.059 | 35% | 12.5h | 25% | −1.00 | +0.139 [−0.164, +0.544] | 36 / +0.167 |
+Year 1 (median ATR $6.80, cap binds on 3 of 46): all caps ≈ identical (+0.43 all-signal, +0.19–0.20 portfolio), diff −0.005.
+Recent half: median ATR **$16.65**, the $20 cap binds on **65 of 68** signals.
+
+### Verdict: **FAIL for every variant** (criterion a: no 95% CI clears zero). $40/none pass b, c, d.
+- Direction favours a wider cap (H1), most at $40, but the CI is 4× wider than the effect: ~68 clustered signals can't
+  separate +0.18R from 0. **H1 not supported, not refuted — LOW.** H3 not seen (no gap worse than −1R at wider caps here).
+- Sensitivity note: the Part 17 anchor's recent-half −0.062 becomes +0.039 here (120h vs 48h time cap + 2h cooldown).
+  The "decay" is real in direction (year 1 ≈ +0.2R, recent ≈ 0) but its size is fragile. Recent-year edge ≈ 0 either way.
+- Per protocol: no change. Changing the cap would also bump CONFIG_REGIME and restart the only live sample.
+
+### Next
+- Keep $20; keep counting bracket trades to n=20 (~Feb 2027). Re-run this script then with the extra months as a
+  confirmation-only check (no new variants): if $40 again leads with a tighter CI, it becomes a real candidate.
+- Phase 0 ledger logs `stopDistance` and `atr` on every candidate, so labelled skipped signals add cap evidence for free.
