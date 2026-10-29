@@ -1827,3 +1827,31 @@ The n=20 live checkpoint (~Feb 2027) cannot answer either: at ±1.44R per-trade 
 - Possible Part 20 (only if the user wants it): pre-register an ATR-normalised pullback gate (gold-equivalent ≈ 0.85×ATR,
   chosen from gold, not from these results) on the same 8 markets. Expect it to be a long shot: even the best clusters
   here are +0.1R with CIs ±0.3–0.4R.
+
+## Part 20 — (A) ATR-normalised pullback gate across markets; (B) independent check of the wider gold stop (Oct 29 2026). Script: `research_pullback_atr.js`. PRE-REGISTERED.
+
+### Question
+(A) Part 19's post-hoc lead: the 0.3%-of-price pullback gate is ~0.85×ATR on gold but 1.1–2.8×ATR on indices/FX (effectively off).
+With the gate set in ATR units, does the rule work out of sample? (B) The user may move the gold stop before Feb if the wider stop
+"looks better again". Re-running gold cannot confirm it — Parts 18 and 19 used the SAME gold data and signals, so "again" would
+be the same evidence twice. An independent check: on the 8 other markets (never used for the stop question), does a stop at
+gold's current effective ATR multiple lose to the designed 1.5×ATR on identical entries?
+
+### Hypotheses
+- A-H1: the gate was the transfer problem; ATR-normalised, pooled E[R] > 0. A-H2: no edge outside gold regardless of gate.
+- B-H1: a capped stop (inside H1 noise) costs R generally, so the gold cap is hurting. B-H2: stop width is roughly R-neutral
+  on identical entries (wider stop wins more often but each win is fewer price units per R); gold's gap is noise.
+
+### Pre-registered design (fixed before running; data = Part 19 cache)
+- Engine, markets, clusters, period, session, cooldown, 120h cap, 15-min fill delay: identical to Part 19.
+- (A) Pullback gate: |price − EMA3| / EMA3 ≤ **0.85 × ATR(14) / EMA3** each bar (0.85 = gold's own median gate in ATR, Part 19).
+  Stop 1.5×ATR unclamped, TP 2R. Same PASS rule as Part 19: (a) pooled 8-market E[R] 95% month-block CI lower bound > 0;
+  (b) ≥ 4 of 6 clusters E[R] > 0; (c) pooled E[R] > 0 in both halves. If FAIL: multi-market closed for EMA Trend for good.
+- (B) k = median over gold's RECENT-half (Oct 2025→) signals of min($20, 1.5×ATR)/ATR, computed from gold only, printed first.
+  On the 8 other markets, every Part-20A signal is resolved twice: stop 1.5×ATR vs stop k×ATR (both 2R). Paired per-signal R
+  difference (1.5 − k), pooled, month-block bootstrap, all signals (not portfolio — signals are identical, occupancy differs).
+  **B-PASS if the pooled paired diff 95% CI lower bound > 0** and ≥ 4 of 6 clusters show diff > 0.
+  Also reported, not judged: same paired diff under the Part 19 gate (0.3% of price), and gold's own paired diff (in-sample).
+- Decision rule for the gold stop (written now): B-PASS + gold's own diff in the same direction → the designed 1.5×ATR stop
+  (MAX_SL raised to $40 as a safety cap) becomes a candidate to deploy now on paper, at the user's call, with a CONFIG_REGIME bump.
+  B-FAIL → keep $20 and the Feb re-check.
