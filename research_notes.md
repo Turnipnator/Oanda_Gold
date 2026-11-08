@@ -1876,3 +1876,148 @@ Reported only: gold (in-sample, both years) −0.054 [−0.238, +0.131]; pooled 
 ### Next
 - The Feb re-check of research_stop_cap.js stays, but with a lower prior: B says to expect ≈ 0.
 - No further frequency levers queued. Remaining honest position: gold H1 ≈ 3 trades/month at a modest, unproven edge.
+
+---
+
+## Part 21 — Gold fell ~$600 Sep–Oct: would shorts have signalled and won? (Nov 6 2026). Script: `research_shorts_decline.mjs`. NOT pre-registered (diagnostic, asked in a healthcheck).
+
+**Question.** Zero bracket-era shorts while gold fell $4,511 → $3,870 (Sep 1 – Oct 30). Is the rule blind to shorts, and would they have paid?
+
+**Hypotheses.** (H1) The 45–85 short RSI band blocks every short in a real decline. (H2) Shorts were available but lost, so the bot was right to sit out. (H3) The leg filter killed the winners.
+
+**Method.** The real `EmaTrendStrategy` on Oanda H1/H4/M5 mid from May 1. One wide-open pass (RSI open both sides, leg filter observe-only), then exact post-hoc filters. Stop = ATR×1.5 capped at $20, 2R TP, 0.30 spread, 08–22 UK, fill on time and +15 min, sequenced (one position, 2h cooldown). ⚠️ `ALLOW_SHORT` defaults to false in config.js, so set `ALLOW_SHORT=true` or you get 0 shorts silently.
+
+**Evidence (sequenced, E[R] at fill +0 / +15 min):**
+| Window | Live rules shorts | Shorts, no RSI floor | Shorts, no RSI floor + no leg filter |
+|---|---|---|---|
+| Sep 1–Nov 6 (decline) | **0** | n=14/15, +0.06 / −0.22 | n=35/30, +0.01 / +0.19 |
+| Jun 1–Jul 10 (decline) | **0** | n=12/11, −0.02 / +0.08 | n=25, +0.43 / +0.31 |
+| Jul 10–Sep 1 (rally) | **0** | n=11/9, −0.47 / −0.35 | n=16/15, −0.27 / −0.42 |
+- Sanity check: since Sep 1 the replay's live-rule sequence is 4 longs, 0 wins, the same as the bot's real 4 longs (all stopped).
+- The RSI 35–45 slice (the bars the floor blocks): 19 bars, E[R] −0.38. Removing the floor does NOT find winners.
+- Live logs: in-session, only 2 shorts cleared RSI ≥45 (Oct 6 08h, Oct 27 10h UK), and the leg filter blocked both. Replay: both would have stopped out (−1R each at +0 and +15 min).
+
+**Findings.**
+- H1 CONFIRMED [HIGH]: under the live band no short qualified in any window since Jun 1. In a falling market RSI sits below 45 whenever ADX is rising.
+- H2 SUPPORTED [MEDIUM]: shorts with the floor removed are ≈0 to negative across all three windows. Sitting out was right.
+- H3 REJECTED as an edge [MEDIUM-LOW]: chasing shorts (leg filter off) won in both declines and lost in the rally. That is drift-following, the mirror of [[up-down-asymmetry-is-drift]], and you only know the regime afterwards. n is small and it is one cycle.
+
+**Next.** Nothing to deploy. Don't loosen SELL_MIN or the leg filter because of a decline seen in hindsight. If shorts are revisited, test a regime-conditional rule, pre-registered, over the 24-month set.
+
+### Part 21b — Triple Confirmation shadow replay (Nov 6 2026). Script: `research_triple_confirmation_replay.mjs`.
+- There is no real shadow: index.js records the "hypothetical" strategy only when the LIVE strategy also enters, and prices it with Breakout levels. The tracker holds 0 Triple Confirmation trades.
+- Replay of the real `strategy.js` + `ta.analyze` (199 H1 bars, VPS env, 08–22 UK, sequenced). Exit A = as configured ($3.50 stop, 1R target); exit B = live bracket ($20 stop, 2R target).
+  - May 15–Nov 6: A n=35, E[R] 0.00 / −0.06 (+0/+15 min), median hold 5 min. B n=28–29, −0.05 / +0.02.
+  - Jul 10–Nov 6: A n=19, −0.24 / −0.14. B n=17, +0.04 both.
+  - Sep 1–Nov 6 (decline, 6 of 10 short): A −0.49, B −0.42.
+- Comparison: the EMA Trend replay over Jul 10–Nov 6 gives 9 trades, ≈ +2.9R. Live it made −0.38R over 8 trades.
+- Verdict [MEDIUM]: Triple Confirmation trades about 2× as often, with no edge under either exit. As configured, its $3.50 stop is noise on an $18 ATR. Don't switch.
+
+---
+
+## Part 22 — Post-release drift: does gold's reaction to NFP / CPI / FOMC keep going? (Nov 6 2026). Script: `research_post_release.js`. PRE-REGISTERED (written before any event data was pulled).
+
+### Question
+After a major scheduled US release, does gold's first 15-minute reaction continue over the next few hours, by enough to trade after spread? This is a separate event-driven sleeve, not a filter on EMA Trend.
+
+### Hypotheses
+- **H1 continuation**: markets under-react at first; the 15-min direction persists, so mean post-entry return in the reaction direction is > 0.
+- **H2 reversal**: the initial spike over-shoots and fades; the mean is < 0, so fading is the trade.
+- **H3 priced in**: 15 minutes is enough; the mean is ≈ 0 and neither direction survives spread.
+
+### Frozen design
+- **Events**: BLS Employment Situation (NFP) and CPI at 08:30 ET; FOMC statement at 14:00 ET. Official BLS/Fed calendars, Jul 2024 – Oct 2026, ET→UTC DST-aware. Each one is verified against an Oanda M1 volume spike at the release minute; unverified or market-closed events are dropped and listed.
+- **Prices**: Oanda XAU_USD M1 **bid/ask**. Pre-price P0 = mid close at T−1 min. Reaction = mid at T+15 − P0. Direction d = sign(reaction).
+- **Entry**: T+15 min, at the ask (long) or bid (short), so the real spread at that minute is paid.
+- **PRIMARY (H1/H2/H3 test)**: time exit at **T+4h** on the opposite side of the book. Return expressed in units of the pre-release H1 ATR(14) (currency-free), also reported in $.
+- **SECONDARY (tradable)**: same entry, **$20 stop / 2R ($40) TP bracket**, 24h max hold, stops and TPs checked on M1 bid/ask (stop fills at the bar extreme if the bar opens through it, otherwise at level).
+- **PASS rule for continuation** (all three): (1) mean PRIMARY return > 0 with an event-bootstrap 90% CI excluding 0; (2) same sign in both time halves (split by event date); (3) same sign in at least 2 of the 3 event types. **Fade** passes only on the mirror of all three, after its own costs. Anything else = H3.
+- **Reported, NOT selected from**: entry T+5/T+30; exit T+1h/T+24h; a "big reactions only" cut (|reaction| ≥ 0.5 × ATR). Results that only appear in the sensitivity grid are not a finding.
+
+### Data
+- Calendar re-pulled from BLS (empsit / cpi news-release archives) and the Fed FOMC calendar. 74 events Jul 2024 – Nov 6 2026 (28 NFP, 27 CPI, 19 FOMC). The Aug 22 2025 FOMC notation vote was excluded because it had no 14:00 statement. 73 verified: the volume ratio at the release minute was ≥1.4×, median 4.8×. Dropped: NFP Apr 3 2026 (Good Friday, no bars).
+- Fetcher: `research_post_release_fetch.mjs` (M1 bid/ask from T−20 min, 1,600 bars; H1 mid for ATR).
+- Median 15-min |reaction| $10.85 against a median pre-release H1 ATR of $9.93, so the reaction is about one hour's normal range.
+
+### Evidence (n=73)
+| | mean (ATR units) | 90% CI | halves | NFP / CPI / FOMC |
+|---|---|---|---|---|
+| **Continuation, PRIMARY** | **−0.240** | [−0.75, +0.33] | −0.57 / +0.09 | −0.47 / −0.10 / −0.11 |
+| **Fade, PRIMARY** | +0.109 | [−0.46, +0.62] | +0.41 / −0.18 | +0.34 / −0.02 / −0.04 |
+| Continuation bracket $20/2R | E[R] −0.141 | [−0.34, +0.09] | — | PF 0.77, 10 TP / 43 stop |
+| Fade bracket $20/2R | E[R] +0.042 | [−0.22, +0.27] | — | PF 1.08 |
+- Sensitivity (not selected from): no cell has a CI excluding 0. Every cell flips sign between halves, except cont exit+1h, which is negative in both. Continuation at +30 min entry looks positive (+0.14) but is negative in the first half and for NFP.
+
+### Verdict — H3 (priced in) [MEDIUM-HIGH]
+- Continuation FAILS all three pass conditions: the mean is negative. The tradable bracket version loses 0.14R/trade.
+- Fade FAILS: the CI includes 0, the halves flip sign, and it is positive in only 1 of 3 event types (NFP). The early-half NFP fade is the only bright spot. It is post hoc and n=27, so it is not a finding.
+- By 15 minutes after a release, gold has already priced the news. The 4-hour and 24-hour drift after that is noise, about 1 ATR wide either way.
+- Self-critique: n=73 is small for an effect this noisy (the CI half-width is ±0.5 ATR). A real but small drift of about 0.1 ATR could not be detected here. That still rules it out as a sleeve, because spread alone costs about 0.07 ATR per round trip.
+
+### Next
+- Closed. Don't re-test on a different window or event subset (that is data snooping). Economic data doesn't give this bot a timing edge once it's public, which agrees with Part 8 and Part 14.
+
+---
+
+## Part 23 — Leg-filter roll-off: do entries soon after a block chase the same exhausted move? (Nov 8 2026). Script: `research_leg_rolloff.js` (to be written). PRE-REGISTERED (written before any replay was run).
+
+### Why this is being asked
+Healthcheck Nov 8: on Oct 28 the leg filter BLOCKED a LONG at 09:01 and 13:01 UTC (legATR 2.74×, 2.97×). At 14:01 the 6-candle window
+no longer reached the ~$4,028 06:00 low, legATR fell to 1.58×, and the LONG fired → −1.00R (−£854). Same up-move, one hour later.
+**Chosen after seeing one loss, so snooping-prone.** The leg filter's own threshold (2.0×) and lookback (6) were also set on this
+same history, so everything here is in-sample for the filter.
+
+### Sub-questions
+- Q1. How often does an allowed entry follow a same-direction leg block within a short window? (If rare, the gap can't matter.)
+- Q2. Do those "post-block" entries do worse than other allowed entries?
+- Q3. Would a "block memory" rule (keep blocking that direction for a while after a block) improve the realistic portfolio?
+
+### Hypotheses
+- **H1 roll-off leak:** post-block entries are the same exhausted move with its start trimmed off; their E[R] is below other allowed
+  entries and close to the blocked set's.
+- **H2 genuine pullback:** the hour(s) after a block often bring a real retracement (Oct 28 entered $11 below the high), so
+  post-block entries are no worse, or better: blocks happen in strong trends and the next pullback is a with-trend entry.
+- **H3 too rare to matter:** fewer than ~15 post-block entries in the full period; the effect can't be measured or matter in £.
+
+### Frozen design
+- **Engine:** identical to Parts 18 and 20. Real `EmaTrendStrategy` with live env (ADX 20, RSI long ≤60 / short ≥45, pullback 0.3%,
+  leg filter ENFORCED at 2.0× over 6 H1, `ALLOW_SHORT=true`), H1 signals aggregated from the M1 bid/ask cache, Oanda H4 HTF closed by
+  signal time. Entry at the first M1 bar ≥ H1 close **+15 min (PRIMARY)**; +0 min reported. M1 bid/ask fills, stop-first on ties, gaps
+  at the open, stop = clamp(1.5×ATR, $2, $20), TP = 2R, 120h cap, session 08–22 UK.
+- **Data:** the same cache as Parts 17–20 (Oct 2024 → Oct 29 2026). Halves: year 1 = before Oct 1 2025, recent = from Oct 1 2025.
+  No new months are added for this test.
+- **Block event:** any H1 evaluation where the strategy returns a leg-filter block (`skipReason`/reason = leg filter), in or out of
+  session (the live filter runs before the session check, so an out-of-session block is real information about the move).
+- **Post-block entry:** an in-session signal that passes every live gate, in the SAME direction as a block whose H1 close is
+  **≤ 6 h earlier (PRIMARY: 6 h = the lookback length, i.e. while the blocked leg is still partly inside the window)**.
+  Reported only: 2 h and 12 h windows, and in-session-only blocks.
+- **Block-memory rule (the one candidate fix):** after a block, refuse same-direction entries for 6 h. Nothing else is varied.
+  A longer lookback (e.g. 12 H1) is reported for context only and cannot be selected.
+
+### Metrics and pass bar
+- **Diagnostic (Q1/Q2), all signals resolved independently:** n and E[R] of post-block entries vs other allowed entries vs the blocked
+  set; difference (post-block − other) with a month-block bootstrap (4000 draws), 90% CI.
+- **Decision (Q3), realistic portfolio** (one position, 2h cooldown, displacement modelled): block-memory vs live, per-month sumR
+  difference, month-block bootstrap 90% CI.
+- **Block memory PASSES only if ALL hold:**
+  (a) ≥15 post-block entries in the full period (otherwise **INCONCLUSIVE → close as H3**);
+  (b) post-block E[R] < other allowed E[R], 90% CI upper bound < 0;
+  (c) portfolio sumR difference > 0 with 90% CI lower bound > 0;
+  (d) portfolio difference ≥ 0 in BOTH halves (not bought in one regime);
+  (e) holds at +0 min as well as +15 min (sign, not significance).
+- Reported, not judged: trades removed per month, winners removed vs losers removed, win rate, TP rate, max DD in R.
+- **Live cross-check (reported only):** for every bracket-era live trade, was there a same-direction block in the prior 6 h?
+  Oct 28 is the only known case; the other 7 are checked from logs. n≤8, cannot pass or fail anything.
+
+### What happens on each outcome
+- PASS → write it up as a paper change, but **do not deploy before the n=20 bracket checkpoint (~Feb 2027)**: any entry change bumps
+  `CONFIG_REGIME` and restarts the only live sample. Re-confirm with the extra months then, no new variants.
+- FAIL or INCONCLUSIVE → close. Oct 28 stays a normal loss. Don't re-test with other windows or thresholds (that is the snooping
+  this pre-registration exists to stop).
+
+### Self-critique before running
+- What would disprove H1: post-block E[R] ≥ other allowed E[R], or the portfolio difference ≤ 0.
+- Simpler explanation to rule out: post-block entries may just be "strong-trend" entries, and strong trends are the bot's best regime
+  (H2). The halves split and the blocked-set comparison are there to tell these apart.
+- Power: with an expected ~20–40 post-block entries, only an effect of roughly 0.5R or more can clear (b). A smaller real leak would
+  read as FAIL. That is acceptable: a smaller leak isn't worth resetting the live count for.
